@@ -547,7 +547,7 @@ cat > "$DMZ_ROOTFS/etc/yunohost/hooks.d/conf_regen/99-nginx_fixup" << EOF
 set -eu
 action=\$1
 pending_dir=\$4
-nginx_conf=\$pending_dir/../nginx/etc/nginx/conf.d/benou.fr.conf
+nginx_conf=\$pending_dir/../nginx/etc/nginx/conf.d/$DOMAIN.conf
 [[ \$action == "pre" ]] || exit 0
 [[ -w \$nginx_conf ]] || exit 1
 sed -e '/resolver/d' \
