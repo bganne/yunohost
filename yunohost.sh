@@ -297,11 +297,13 @@ cat > /etc/chrony/chrony.conf << EOF
 pool 2.debian.pool.ntp.org iburst
 keyfile /etc/chrony/chrony.keys
 driftfile /var/lib/chrony/chrony.drift
+ntsdumpdir /var/lib/chrony
 logdir /var/log/chrony
 maxupdateskew 100.0
 rtcsync
 makestep 1 3
 allow $LAN_NET4
+leapsectz right/UTC
 EOF
 
 ## configure dnsmasq
