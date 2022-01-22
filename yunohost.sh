@@ -639,6 +639,16 @@ nextcloud "config:import" << EOF
 }
 EOF
 
+# default fcgi timeouts are too low for nextcloud
+cat > "$DMZ_ROOTFS/etc/nginx/conf.d/$DOMAIN.d/99-fix-nextcloud-timeouts.conf" << EOF
+proxy_connect_timeout 600s;
+proxy_send_timeout 600s;
+proxy_read_timeout 600s;
+fastcgi_send_timeout 600s;
+fastcgi_read_timeout 600s;
+EOF
+dmzexec systemctl reload nginx
+
 ## setup fetchmail
 cat > "$DMZ_ROOTFS/etc/fetchmailrc" << EOF
 defaults ssl fetchall nokeep mda "/usr/lib/dovecot/deliver -d %T"
