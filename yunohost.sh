@@ -348,7 +348,7 @@ cat > /etc/resolv.conf << EOF
 nameserver 127.0.0.1
 EOF
 
-## setup network
+# setup network
 ifdown $LAN || true
 cat > /etc/network/interfaces << EOF
 auto lo
@@ -360,6 +360,10 @@ iface $LAN inet static
 	address $LAN_IP4/$LAN_PREFIX
 	gateway $LAN_GW4
 EOF
+
+# disable lxc-net: we do not use it, and it runs dnsmasq, clashing with our own
+systemctl stop lxc-net
+systemctl mask lxc-net
 
 # reload network config
 hostname -F /etc/hostname
@@ -616,6 +620,23 @@ nextcloud "maintenance:mode --off"
 nextcloud "app:install calendar"
 nextcloud "app:install contacts"
 nextcloud "app:install mail"
+
+# install and configure previews
+nextcloud "app:install previewgenerator"
+nextcloud config:system:set preview_max_x --value 2048
+nextcloud config:system:set preview_max_y --value 2048
+nextcloud config:system:set jpeg_quality --value 60
+nextcloud config:app:set previewgenerator squareSizes --value="32 256"
+nextcloud config:app:set previewgenerator widthSizes  --value="256 384"
+nextcloud config:app:set previewgenerator heightSizes --value="256"
+nextcloud config:app:set preview jpeg_quality --value="60"
+cat > "$DMZ_ROOTFS/etc/cron.d/99-nextcloud-preview" << EOF
+*/15  *  *  *  * nextcloud /usr/bin/php7.3 --define apc.enable_cli=1 /var/www/nextcloud/occ preview:pre-generate
+EOF
+
+# scan data and generate preview if any
+nextcloud "files:scan-app-data"
+nextcloud "files:scan-app-data"
 
 # fixup some nextcloud configs...
 nextcloud "config:import" << EOF
