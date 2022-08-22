@@ -61,6 +61,46 @@ getpass()
 	done
 }
 
+# helper to run command in container
+dmzexec()
+{
+	lxc-attach -n "$DMZ_NAME" --clear-env --keep-var DEBIAN_FRONTEND -- /bin/sh -c "$*"
+}
+
+# helper to run occ commands in the container
+nextcloud()
+{
+	dmzexec "cd /var/www/nextcloud && sudo -u nextcloud php7.3 --define apc.enable_cli=1 occ $*"
+}
+
+# helper to create a new file in DMZ
+dmzcat()
+{
+	local perm="$1"
+	local file="$DMZ_ROOTFS/$2"
+	cat > "$file"
+	chown 100000:100000 "$file"
+	chmod "$perm" "$file"
+}
+
+# update resolv.conf helper
+dmz_resolvconf() {
+	rm -f "$DMZ_ROOTFS/etc/resolv.conf"
+	dmzcat 644 /etc/resolv.conf << EOF
+domain $DOMAIN
+search $DOMAIN
+nameserver $DMZ_GW4
+EOF
+}
+
+idempotent_append() {
+	local guard='# yunohost provisioning - do not remove'
+	local file="$1"
+	grep -q -F "$guard" "$1" && file="/dev/null"
+	echo "$guard" >> "$file"
+	cat >> "$file"
+}
+
 #
 # FIREWALL
 #
@@ -130,18 +170,6 @@ table ip nat {
 }
 EOF
 } # end of firewall
-
-# helper to run command in container
-dmzexec()
-{
-	lxc-attach -n "$DMZ_NAME" --clear-env --keep-var DEBIAN_FRONTEND -- /bin/sh -c "$*"
-}
-
-# helper to run occ commands in the container
-nextcloud()
-{
-	dmzexec "cd /var/www/nextcloud && sudo -u nextcloud php7.3 --define apc.enable_cli=1 occ $*"
-}
 
 #
 # STOP
@@ -221,25 +249,6 @@ dmzexec ifup --force eth0
 # PROVISION
 #  setup host - must be run once
 #
-
-# update resolv.conf helper
-dmz_resolvconf() {
-rm -f "$DMZ_ROOTFS/etc/resolv.conf"
-cat > "$DMZ_ROOTFS/etc/resolv.conf" << EOF
-domain $DOMAIN
-search $DOMAIN
-nameserver $DMZ_GW4
-EOF
-chown 100000:100000 "$DMZ_ROOTFS/etc/resolv.conf"
-}
-
-idempotent_append() {
-local guard='# yunohost provisioning - do not remove'
-local file="$1"
-grep -q -F "$guard" "$1" && file="/dev/null"
-echo "$guard" >> "$file"
-cat >> "$file"
-}
 
 provision() {
 
@@ -465,18 +474,18 @@ lxc.mount.entry=$DATA_MAIL var/mail none bind 0 0
 EOF
 
 # setup container network
-echo "$DMZ_NAME" > "$DMZ_ROOTFS/etc/hostname"
-chown 100000:100000 "$DMZ_ROOTFS/etc/hostname"
+dmzcat 644 /etc/hostname << EOF
+$DMZ_NAME
+EOF
 
-cat > "$DMZ_ROOTFS/etc/hosts" << EOF
+dmzcat 644 /etc/hosts << EOF
 127.0.0.1	localhost localhost.localdomain localhost.$DOMAIN
 
 $LAN_IP4	$HOST_FQDN $HOST_NAME
 $DMZ_IP4	$DMZ_FQDN $DMZ_NAME $DOMAIN
 EOF
-chown 100000:100000 "$DMZ_ROOTFS/etc/hosts"
 
-cat > "$DMZ_ROOTFS/etc/network/interfaces" << EOF
+dmzcat 644 /etc/network/interfaces << EOF
 auto lo
 iface lo inet loopback
 
@@ -485,7 +494,6 @@ iface eth0 inet static
 	pointopoint $DMZ_GW4
 	gateway $DMZ_GW4
 EOF
-chown 100000:100000 "$DMZ_ROOTFS/etc/network/interfaces"
 
 # update resolv.conf
 dmz_resolvconf
@@ -512,9 +520,8 @@ net.ipv4.tcp_fastopen=1027
 EOF
 
 # workaround fail2ban: make sure auth.log exists
-touch "$DMZ_ROOTFS/var/log/auth.log"
-chmod 600 "$DMZ_ROOTFS/var/log/auth.log"
-chown 100000:100000 "$DMZ_ROOTFS/var/log/auth.log"
+dmzcat 600 /var/log/auth.log << EOF
+EOF
 
 # start container
 start
@@ -547,8 +554,9 @@ dmzexec yunohost settings set security.experimental.enabled -v true
 
 # setup yunohost config hooks to tweak conf automatically
 mkdir -p "$DMZ_ROOTFS/etc/yunohost/hooks.d/conf_regen"
+chown -R 100000:100000 "$DMZ_ROOTFS/etc/yunohost/hooks.d"
 # make sure nginx use default resolver
-cat > "$DMZ_ROOTFS/etc/yunohost/hooks.d/conf_regen/99-nginx_fixup" << EOF
+dmzcat 755 /etc/yunohost/hooks.d/conf_regen/99-nginx_fixup << EOF
 #!/bin/bash
 set -eu
 action=\$1
@@ -559,9 +567,8 @@ nginx_conf=\$pending_dir/../nginx/etc/nginx/conf.d/$DOMAIN.conf
 sed -e '/resolver/d' \
     -i \$nginx_conf
 EOF
-chmod 755 "$DMZ_ROOTFS/etc/yunohost/hooks.d/conf_regen/99-nginx_fixup"
 # make sure only the main user can login through ssh
-cat > "$DMZ_ROOTFS/etc/yunohost/hooks.d/conf_regen/99-ssh_fixup" << EOF
+dmzcat 755 /etc/yunohost/hooks.d/conf_regen/99-ssh_fixup << EOF
 #!/bin/bash
 set -eu
 action=\$1
@@ -575,8 +582,6 @@ sed -e 's/^AllowGroups .*$/AllowUsers $YN_USER/' \
     -e '/PermitRootLogin yes/d'         \
     -i \$ssh_conf
 EOF
-chmod 755 "$DMZ_ROOTFS/etc/yunohost/hooks.d/conf_regen/99-ssh_fixup"
-chown -R 100000:100000 "$DMZ_ROOTFS/etc/yunohost/hooks.d"
 
 # fixup postfix to relay through gandi mail
 dmzexec "yunohost settings set smtp.relay.host -v '$MAIL_RELAY_HOST'"
@@ -587,20 +592,18 @@ dmzexec "yunohost settings set smtp.relay.port -v '$MAIL_RELAY_PORT'"
 # setup fail2ban to use iproute2 instead of iptables
 # as rpf is enabled (see sysctl above) incoming packets will be dropped too
 # the metric magic is to distinguished between multiple jails
-cat > "$DMZ_ROOTFS/etc/fail2ban/jail.local" << EOF
+dmzcat 644 /etc/fail2ban/jail.local << EOF
 [DEFAULT]
 banaction = route
 banaction_allports = route
 EOF
-cat > "$DMZ_ROOTFS/etc/fail2ban/action.d/route.local" << EOF
+dmzcat 644 /etc/fail2ban/action.d/route.local << EOF
 [Definition]
 actionban   = ip route add <blocktype> <ip> metric $(echo -n '<name>'|cksum|cut -f 1 -d ' ')
 actionunban = ip route del <blocktype> <ip> metric $(echo -n '<name>'|cksum|cut -f 1 -d ' ')
 [Init]
 blocktype = blackhole
 EOF
-chmod --reference="$DMZ_ROOTFS/etc/fail2ban/jail.conf" "$DMZ_ROOTFS/etc/fail2ban/jail.local"
-chmod --reference="$DMZ_ROOTFS/etc/fail2ban/action.d/route.local" "$DMZ_ROOTFS/etc/fail2ban/action.d/route.local"
 dmzexec systemctl restart fail2ban
 
 # install nextcloud into domain.tld/cloud with mail and calendar apps
@@ -623,14 +626,14 @@ nextcloud "app:install mail"
 
 # install and configure previews
 nextcloud "app:install previewgenerator"
-nextcloud config:system:set preview_max_x --value 2048
-nextcloud config:system:set preview_max_y --value 2048
-nextcloud config:system:set jpeg_quality --value 60
-nextcloud config:app:set previewgenerator squareSizes --value="32 256"
-nextcloud config:app:set previewgenerator widthSizes  --value="256 384"
-nextcloud config:app:set previewgenerator heightSizes --value="256"
-nextcloud config:app:set preview jpeg_quality --value="60"
-cat > "$DMZ_ROOTFS/etc/cron.d/99-nextcloud-preview" << EOF
+nextcloud "config:system:set preview_max_x --value 2048"
+nextcloud "config:system:set preview_max_y --value 2048"
+nextcloud "config:system:set jpeg_quality --value 60"
+nextcloud "config:app:set previewgenerator squareSizes --value='32 256'"
+nextcloud "config:app:set previewgenerator widthSizes  --value='256 384'"
+nextcloud "config:app:set previewgenerator heightSizes --value='256'"
+nextcloud "config:app:set preview jpeg_quality --value='60'"
+dmzcat 644 /etc/cron.d/99-nextcloud-preview << EOF
 */15  *  *  *  * nextcloud /usr/bin/php7.3 --define apc.enable_cli=1 /var/www/nextcloud/occ preview:pre-generate
 EOF
 
@@ -661,17 +664,17 @@ nextcloud "config:import" << EOF
 EOF
 
 # default fcgi timeouts are too low for nextcloud
-cat > "$DMZ_ROOTFS/etc/nginx/conf.d/$DOMAIN.d/99-fix-nextcloud-timeouts.conf" << EOF
-proxy_connect_timeout 600s;
-proxy_send_timeout 600s;
-proxy_read_timeout 600s;
-fastcgi_send_timeout 600s;
-fastcgi_read_timeout 600s;
+dmzcat 644 "/etc/nginx/conf.d/$DOMAIN.d/99-fix-nextcloud-timeouts.conf" << EOF
+proxy_connect_timeout 120s;
+proxy_send_timeout 120s;
+proxy_read_timeout 120s;
+fastcgi_send_timeout 120s;
+fastcgi_read_timeout 120s;
 EOF
 dmzexec systemctl reload nginx
 
 ## setup fetchmail
-cat > "$DMZ_ROOTFS/etc/fetchmailrc" << EOF
+dmzcat 600 /etc/fetchmailrc << EOF
 defaults ssl fetchall nokeep mda "/usr/lib/dovecot/deliver -d %T"
 set postmaster "$MAIL_POSTMASTER"
 set bouncemail
@@ -683,8 +686,7 @@ poll $MAIL_IMAP_HOST with proto imap port 993 and timeout 120
 	user '$MAIL_RELAY_USER' with pass "$MAIL_RELAY_PASS" is '$YN_USER' here
 EOF
 chown --reference="$DMZ_ROOTFS/var/mail" "$DMZ_ROOTFS/etc/fetchmailrc"
-chmod 600 "$DMZ_ROOTFS/etc/fetchmailrc"
-cat > "$DMZ_ROOTFS/etc/default/fetchmail" << EOF
+dmzcat 644 /etc/default/fetchmail << EOF
 export LC_ALL=C
 USER=vmail
 START_DAEMON=yes
@@ -701,12 +703,10 @@ echo unattended-upgrades unattended-upgrades/enable_auto_updates boolean true | 
 dmzexec dpkg-reconfigure -f noninteractive unattended-upgrades
 
 # logwatch in dmz
-cat > "$DMZ_ROOTFS/etc/logwatch/conf/logwatch.conf" << EOF
+dmzcat 644 /etc/logwatch/conf/logwatch.conf << EOF
 Detail = Low
 MailFrom = root@$DMZ_FQDN
 EOF
-chown 100000:100000 "$DMZ_ROOTFS/etc/logwatch/conf/logwatch.conf"
-chmod 644 "$DMZ_ROOTFS/etc/logwatch/conf/logwatch.conf"
 
 # disable annoying warnings
 dmzexec yunohost diagnosis run
@@ -734,6 +734,12 @@ dmzexec yunohost diagnosis ignore --filter basesystem test=high_number_auth_fail
 ## start DMZ at boot
 cat > /etc/rc.local << EOF
 #!/bin/sh
+# https://raid.wiki.kernel.org/index.php/Timeout_Mismatch 
+smartctl -l scterc,70,70 /dev/sda
+echo 180 > /sys/block/sdb/device/timeout
+blockdev --setra 1024 /dev/sda
+blockdev --setra 1024 /dev/sdb
+# Yunohost
 "$(readlink -f "$0")" start
 exit 0
 EOF
@@ -769,6 +775,7 @@ borg_backup() {
 		--show-rc \
 		--exclude "$DATA_HOME/yunohost.multimedia/share/Music/" \
 		--exclude "$DATA_HOME/yunohost.multimedia/share/Video/" \
+		--exclude "$DATA_HOME/yunohost.app/nextcloud/data/appdata_*/preview/" \
 		--compression zstd \
 		"$repo::{hostname}-{now}" \
 		$DATA_HOME \
@@ -810,6 +817,7 @@ apt-get -y dist-upgrade
 apt-get -y autoremove
 
 # update yunohost
+dmzexec yunohost tools update
 dmzexec yunohost tools upgrade system
 dmzexec yunohost tools upgrade apps
 
