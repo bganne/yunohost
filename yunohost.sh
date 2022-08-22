@@ -16,12 +16,6 @@ readonly LAN_NET4="10.0.2.0/$LAN_PREFIX"
 readonly HOST_NAME=host
 readonly HOST_FQDN="$HOST_NAME.$DOMAIN"
 
-readonly DATA_DIR="/data"
-readonly DATA_HOME="$DATA_DIR/home"
-readonly DATA_MAIL="$DATA_DIR/mail"
-readonly DATA_BACKUP="$DATA_DIR/backup"
-readonly DATA_BACKUP_REMOTE="login@rsync.example.com:$HOST_NAME"
-
 readonly DMZ=dmz0
 readonly DMZ_NAME=dmz
 readonly DMZ_FQDN="$DMZ_NAME.$DOMAIN"
@@ -30,6 +24,12 @@ readonly DMZ_GW4_PTR="1.100.168.192"
 readonly DMZ_IP4="192.168.100.2"
 readonly DMZ_ROOTFS="/var/lib/lxc/$DMZ_NAME/rootfs"
 readonly DMZ_SSH=1111
+
+readonly DATA_DIR="/data/$DMZ_NAME"
+readonly DATA_HOME="$DATA_DIR/home"
+readonly DATA_MAIL="$DATA_DIR/mail"
+readonly DATA_BACKUP="$DATA_DIR/backup"
+readonly DATA_BACKUP_REMOTE="login@rsync.example.com:$HOST_NAME"
 
 readonly YN_USER=test
 readonly YN_USER_FIRST='Test-first'
@@ -70,7 +70,7 @@ dmzexec()
 # helper to run occ commands in the container
 nextcloud()
 {
-	dmzexec "cd /var/www/nextcloud && sudo -u nextcloud php7.3 --define apc.enable_cli=1 occ $*"
+	dmzexec "cd /var/www/nextcloud && sudo -u nextcloud php8.0 --define apc.enable_cli=1 occ $*"
 }
 
 # helper to create a new file in DMZ
@@ -242,8 +242,9 @@ while sleep 1; do
 	esac
 done
 
-# enable eth0 in container
-dmzexec ifup --force eth0
+# systemd-networkd maintainers seem to believe it is ok to
+# override kernel setting explicitely set in sysctl.conf...
+dmzexec sysctl -p
 
 } # end of start()
 
@@ -472,7 +473,7 @@ EOF
 
 ## create container
 lxc-info -n "$DMZ_NAME" ||
-	lxc-create -n "$DMZ_NAME" -t download -- -d debian -r buster -a amd64 --keyserver keyserver.ubuntu.com
+	lxc-create -n "$DMZ_NAME" -t download -- -d debian -r bullseye -a amd64 --keyserver keyserver.ubuntu.com
 
 # add bind mount for /home and /var/mail
 mkdir -p "$DATA_HOME" "$DATA_MAIL"
@@ -499,14 +500,16 @@ $LAN_IP4	$HOST_FQDN $HOST_NAME
 $DMZ_IP4	$DMZ_FQDN $DMZ_NAME $DOMAIN
 EOF
 
-dmzcat 644 /etc/network/interfaces << EOF
-auto lo
-iface lo inet loopback
+dmzcat 644 "/etc/systemd/network/eth0.network" << EOF
+[Match]
+Name=eth0
 
-iface eth0 inet static
-	address $DMZ_IP4/32
-	pointopoint $DMZ_GW4
-	gateway $DMZ_GW4
+[Network]
+Gateway=$DMZ_GW4
+
+[Address]
+Address=$DMZ_IP4/32
+Peer=$DMZ_GW4/32
 EOF
 
 # update resolv.conf
@@ -540,6 +543,10 @@ EOF
 # start container
 start
 
+# we do not use systemd-resolved
+dmzexec systemctl stop systemd-resolved
+dmzexec systemctl mask systemd-resolved
+
 dmzexec timedatectl set-timezone "$TIMEZONE"
 
 ## install Yunohost with default user
@@ -554,8 +561,9 @@ dmzexec "yunohost user permission add ssh '$YN_USER'"
 
 # disable unused services
 dmzexec systemctl stop dnsmasq metronome ntp systemd-resolved yunohost-firewall yunohost-api yunomdns
-dmzexec systemctl mask dnsmasq metronome ntp systemd-resolved yunohost-firewall yunohost-api
-dmzexec systemctl disable yunomdns
+dmzexec systemctl mask dnsmasq metronome ntp systemd-resolved
+# unfortunately we cannot mask those, so diable them
+dmzexec systemctl disable yunohost-firewall yunohost-api yunomdns
 
 # update resolv.conf again: avoid brain damage by resolvconf
 dmz_resolvconf
@@ -648,7 +656,7 @@ nextcloud "config:app:set previewgenerator widthSizes  --value='256 384'"
 nextcloud "config:app:set previewgenerator heightSizes --value='256'"
 nextcloud "config:app:set preview jpeg_quality --value='60'"
 dmzcat 644 /etc/cron.d/99-nextcloud-preview << EOF
-*/15  *  *  *  * nextcloud /usr/bin/php7.3 --define apc.enable_cli=1 /var/www/nextcloud/occ preview:pre-generate
+*/15  *  *  *  * nextcloud /usr/bin/php8.0 --define apc.enable_cli=1 /var/www/nextcloud/occ preview:pre-generate
 EOF
 
 # scan data and generate preview if any
@@ -688,6 +696,12 @@ EOF
 dmzexec systemctl reload nginx
 
 ## setup fetchmail
+
+# fetchmail use vmail user and its homedire is set to /var/vmail
+# unfortunately that does not exist and confuses fetchmail
+mkdir -p "$DMZ_ROOTFS/var/vmail"
+chown --reference="$DATA_MAIL/$YN_USER" "$DMZ_ROOTFS/var/vmail"
+
 dmzcat 600 /etc/fetchmailrc << EOF
 defaults ssl fetchall nokeep mda "/usr/lib/dovecot/deliver -d %T"
 set postmaster "$MAIL_POSTMASTER"
@@ -699,7 +713,8 @@ poll $MAIL_IMAP_HOST with proto imap port 993 and timeout 120
 	user '$YN_USER@$DOMAIN' with pass "$YN_USER_PASS" is '$YN_USER' here
 	user '$MAIL_RELAY_USER' with pass "$MAIL_RELAY_PASS" is '$YN_USER' here
 EOF
-chown --reference="$DMZ_ROOTFS/var/mail" "$DMZ_ROOTFS/etc/fetchmailrc"
+chown --reference="$DATA_MAIL/$YN_USER" "$DMZ_ROOTFS/etc/fetchmailrc"
+
 dmzcat 644 /etc/default/fetchmail << EOF
 export LC_ALL=C
 USER=vmail
@@ -742,6 +757,9 @@ dmzexec yunohost diagnosis ignore --filter services service=yunomdns || true
 dmzexec yunohost diagnosis ignore --filter mail test=mail_blacklist || true
 dmzexec yunohost diagnosis ignore --filter mail test=mail_queue || true
 dmzexec yunohost diagnosis ignore --filter basesystem test=high_number_auth_failure || true
+dmzexec yunohost diagnosis ignore --filter yunohost diagnosis ignore --filter regenconf file=/etc/postfix/sasl_passwd.db || true
+dmzexec yunohost diagnosis ignore --filter yunohost diagnosis ignore --filter regenconf file=/etc/systemd/system/yunohost-api.service || true
+dmzexec yunohost diagnosis ignore --filter yunohost diagnosis ignore --filter regenconf file=/etc/systemd/system/yunohost-firewall.service || true
 
 ### Finalization
 
