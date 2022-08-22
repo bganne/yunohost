@@ -126,10 +126,12 @@ table ip filter {
 		iifname "$DMZ" udp dport domain counter accept
 		# accept local connections from LAN
 		iifname "$LAN" ip saddr $LAN_NET4 counter accept
-		# accept local connections to SSH and DNS/TCP from DMZ
-		iifname "$DMZ" tcp dport { ssh, domain } counter accept
+		# accept local connections to SSH, HTTP and DNS/TCP from DMZ
+		iifname "$DMZ" tcp dport { ssh, http, domain } counter accept
 		# accept icmp
 		ip protocol icmp counter accept
+		# ignore dhcp requests on LAN
+		iifname "$LAN" ip saddr 0.0.0.0 ip daddr 255.255.255.255 udp sport 68 udp dport 67 counter drop
 		# drop and log anything else
 		log prefix "[FW INPUT]:" counter drop
 	}
