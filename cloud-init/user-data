@@ -1,0 +1,34 @@
+#cloud-config
+# user debian with password debian
+users:
+  - name: debian
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: users, admin
+    home: /home/debian
+    shell: /bin/bash
+    lock_passwd: false
+    ssh-authorized-keys:
+      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCx8UVdei/dzJuOTFiGd7SWjaG+rZOGKxGldtnK3lUYT+HM0UTi/+F5N40wylSP5tmQ/9e6GVcTJlfcm099kwPGUkx7RMPZLbyB8il3nYv/r7604jHJNAM+IS//YIaV9t56EMjjk4Q+gDls9cX9vjDsGWrBR17C6fdtBknKgtE6HnHcaD0sLpsTNq3oQBFAwN9bn4hb5EHRHix31gY0NKA5CdElFLZc3kl+tdNe1GCRITyyQz8MtSU4BkXY04cxZfFAion24FLHQZ5hvFy2FGWYOdj1Q8luIV1nWxGI9ntDzEhj2dejufnqdIps/qXjb3VbJfWstdoYVlFEVe8H0SCFaa+o+b5AkfWY7caQAv3QBzd3oxZ8/PfDWBTavlSelrdIxVBMpDRR6DufysMsOCzw0/eYk9+nMbMRjWk8cqX9jB4XzI443QVss8UcRIdG7zHE3S15dcPUjUQb0JQb84dWBWVQN3FcU73a88fMTLDsYEn6pHfFm2eOzMBy3WMFyu0= ben@erebor
+
+chpasswd:
+  list: |
+     debian:debian
+  expire: False
+
+ssh_pwauth: False
+
+# debian cloud images have small disks (2G), use an additional, bigger disk for /var and /home
+# we also mount the local folder read-only so we can access the provisioning script easily
+# also, we disable cloud-init at the end
+bootcmd:
+  - modprobe 9pnet_virtio
+  - echo 9pnet_virtio >> /etc/initramfs-tools/modules
+  - update-initramfs -u
+  - mkdir /host /data
+  - echo '/dev/vdb /data ext4 discard,relatime 0 2' >> /etc/fstab
+  - echo 'host /host 9p ro,trans=virtio 0 0' >> /etc/fstab
+  - mount -a
+  - mkdir /data/host
+  - mv /var /data/host/ && ln -s /data/host/var /var
+  - mv /home /data/host/ && ln -s /data/host/home /home
+  - touch /etc/cloud/cloud-init.disabled

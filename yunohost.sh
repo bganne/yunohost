@@ -7,7 +7,7 @@ set -eu
 
 readonly DOMAIN=yunohost.example.com
 
-readonly LAN=eth0
+readonly LAN=ens3
 readonly LAN_IP4="10.0.2.15"
 readonly LAN_GW4="10.0.2.2"
 readonly LAN_PREFIX="24"
@@ -437,13 +437,15 @@ EOF
 ## setup smartmontools
 cat > /etc/smartd.conf << EOF
 # test email on startup
-/dev/sda -m root -M test
+/dev/vda -m root -M test
+/dev/vdb -m root -M test
 
 # Monitor all attributes, enable automatic online data collection,
 # automatic Attribute autosave, and start a short self-test every
 # day between 2-3am, and a long self test Saturdays between 3-4am.
 # Send alert emails to root
-/dev/sda -a -o on -S on -s (S/../.././01|L/../../5/03) -m root
+/dev/vda -a -o on -S on -s (S/../.././01|L/../../5/03) -m root
+/dev/vdb -a -o on -S on -s (S/../.././01|L/../../5/03) -m root
 EOF
 cat > /etc/default/smartmontools << EOF
 start_smartd=yes
@@ -747,10 +749,10 @@ dmzexec yunohost diagnosis ignore --filter basesystem test=high_number_auth_fail
 cat > /etc/rc.local << EOF
 #!/bin/sh
 # https://raid.wiki.kernel.org/index.php/Timeout_Mismatch 
-smartctl -l scterc,70,70 /dev/sda
-echo 180 > /sys/block/sdb/device/timeout
-blockdev --setra 1024 /dev/sda
-blockdev --setra 1024 /dev/sdb
+echo 180 > /sys/block/vda/device/timeout
+echo 180 > /sys/block/vdb/device/timeout
+blockdev --setra 1024 /dev/vda
+blockdev --setra 1024 /dev/vdb
 # Yunohost
 "$(readlink -f "$0")" start
 exit 0
