@@ -285,6 +285,39 @@ net.ipv4.tcp_fastopen=1027
 EOF
 sysctl -p /etc/sysctl.conf
 
+## minimal static network config to get basic internet connectivity
+
+# just in case this stupid tool is there...
+apt-get -y purge resolvconf || true
+
+# configure DNS (will be overriden by dnsmasq later)
+cat > /etc/resolv.conf << EOF
+# Cloudflare
+nameserver 1.1.1.1
+nameserver 1.0.0.1
+# Google
+nameserver 8.8.8.8
+EOF
+
+echo "$HOST_FQDN" > /etc/hostname
+
+# setup network
+ifdown $LAN || true
+cat > /etc/network/interfaces << EOF
+auto lo
+iface lo inet loopback
+
+# LAN
+auto $LAN
+iface $LAN inet static
+	address $LAN_IP4/$LAN_PREFIX
+	gateway $LAN_GW4
+EOF
+
+# reload network config
+hostname -F /etc/hostname
+ifup $LAN || true
+
 apt-get -y update
 apt-get -y dist-upgrade
 apt-get -y install chrony \
@@ -318,6 +351,12 @@ leapsectz right/UTC
 EOF
 
 ## configure dnsmasq
+
+# disable lxc-net: we do not use it, and it runs dnsmasq, clashing with our own
+systemctl stop lxc-net
+systemctl mask lxc-net
+
+# create dnsmasq config
 [ -f /etc/dnsmasq.conf.pkg ] || mv /etc/dnsmasq.conf /etc/dnsmasq.conf.pkg
 cat > /etc/dnsmasq.conf << EOF
 bogus-priv
@@ -334,18 +373,8 @@ ptr-record=$DMZ_GW4_PTR.in-addr.arpa,$HOST_FQDN
 address=/use-application-dns.net/
 EOF
 
-# configure DNS
-cat > /etc/resolv.dnsmasq << EOF
-# default virtualbox dns address
-# nameserver 10.0.2.2
-# Cloudflare
-nameserver 1.1.1.1
-nameserver 1.0.0.1
-# Google
-nameserver 8.8.8.8
-EOF
-
-echo "$HOST_FQDN" > /etc/hostname
+# move DNS conf to be served by dnsmasq
+mv /etc/resolv.conf /etc/resolv.dnsmasq
 
 # hosts file: this will be served by dnsmasq
 cat > /etc/hosts << EOF
@@ -355,30 +384,11 @@ $LAN_IP4	$HOST_FQDN $HOST_NAME
 $DMZ_IP4	$DMZ_FQDN $DMZ_NAME $DOMAIN
 EOF
 
+# use dnsmasq for local dns from now on
 cat > /etc/resolv.conf << EOF
 nameserver 127.0.0.1
 EOF
 
-# setup network
-ifdown $LAN || true
-cat > /etc/network/interfaces << EOF
-auto lo
-iface lo inet loopback
-
-# LAN
-auto $LAN
-iface $LAN inet static
-	address $LAN_IP4/$LAN_PREFIX
-	gateway $LAN_GW4
-EOF
-
-# disable lxc-net: we do not use it, and it runs dnsmasq, clashing with our own
-systemctl stop lxc-net
-systemctl mask lxc-net
-
-# reload network config
-hostname -F /etc/hostname
-ifup $LAN || true
 systemctl restart dnsmasq
 systemctl restart chrony
 
