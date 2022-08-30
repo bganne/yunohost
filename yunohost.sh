@@ -807,7 +807,7 @@ borg_backup() {
 		--show-rc \
 		--exclude "$DATA_HOME/yunohost.multimedia/share/Music/" \
 		--exclude "$DATA_HOME/yunohost.multimedia/share/Video/" \
-		--exclude "$DATA_HOME/yunohost.app/nextcloud/data/appdata_*/preview/" \
+		--exclude "$DATA_HOME/yunohost.app/nextcloud/data/appdata_*/preview*/" \
 		--compression zstd \
 		"$repo::{hostname}-{now}" \
 		$DATA_HOME \
