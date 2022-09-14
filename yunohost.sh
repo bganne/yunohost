@@ -223,28 +223,14 @@ mkdir -p /var/run/netns
 rm -f "/var/run/netns/$nspid"
 ln -s "/proc/$nspid/ns/net" "/var/run/netns/$nspid"
 
-# move iface to container under eth0 name
+# move iface to container under eth0 name and configure it
 ip link set guest name eth0 netns "$nspid"
+ip -n "$nspid" addr add dev eth0 $DMZ_IP4/32 peer $DMZ_GW4/32
+ip -n "$nspid" link set dev eth0 up
+ip -n "$nspid" route add default via $DMZ_GW4
 
 # remove netns so iproute2 ignores it again
 rm -f "/var/run/netns/$nspid"
-
-# wait for the system to be fully up, to avoid issue with systemctl, dbus etc not ready
-# it's a mess
-while sleep 1; do
-	case "x$(dmzexec systemctl is-system-running --wait)" in
-		xrunning)
-			break
-			;;
-		xdegraded)
-			break
-			;;
-	esac
-done
-
-# systemd-networkd maintainers seem to believe it is ok to
-# override kernel setting explicitely set in sysctl.conf...
-dmzexec sysctl -p
 
 } # end of start()
 
@@ -498,18 +484,6 @@ dmzcat 644 /etc/hosts << EOF
 
 $LAN_IP4	$HOST_FQDN $HOST_NAME
 $DMZ_IP4	$DMZ_FQDN $DMZ_NAME $DOMAIN
-EOF
-
-dmzcat 644 "/etc/systemd/network/eth0.network" << EOF
-[Match]
-Name=eth0
-
-[Network]
-Gateway=$DMZ_GW4
-
-[Address]
-Address=$DMZ_IP4/32
-Peer=$DMZ_GW4/32
 EOF
 
 # update resolv.conf
