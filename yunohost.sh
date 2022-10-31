@@ -209,6 +209,7 @@ ip addr add "$DMZ_GW4/32" dev "$DMZ" peer "$DMZ_IP4/32"
 ip link set dev "$DMZ" up
 
 lxc-start -n "$DMZ_NAME"
+# wait for lxc to be ready...
 lxc-wait -n "$DMZ_NAME" -s RUNNING
 
 ## move veth peer to container
@@ -514,12 +515,20 @@ EOF
 dmzcat 600 /var/log/auth.log << EOF
 EOF
 
+# make sure networkd will not mess up the network
+ln -sf /dev/null "$DMZ_ROOTFS/etc/systemd/system/systemd-networkd.service"
+
 # start container
 start
 
-# we do not use systemd-resolved
-dmzexec systemctl stop systemd-resolved
-dmzexec systemctl mask systemd-resolved
+# wait for systemd to be ready...
+dmzexec "while [ ! -S /run/systemd/private ]; do sleep 1;done"
+# wait for the system to be ready...
+dmzexec systemctl is-system-running --wait || true
+
+# we do not use those...
+dmzexec systemctl stop systemd-networkd sys-kernel-config.mount sys-kernel-debug.mount
+dmzexec systemctl mask systemd-networkd sys-kernel-config.mount sys-kernel-debug.mount
 
 dmzexec timedatectl set-timezone "$TIMEZONE"
 
@@ -534,8 +543,8 @@ dmzexec "yunohost user info '$YN_USER' 2>&1 >/dev/null || yunohost user create '
 dmzexec "yunohost user permission add ssh '$YN_USER'"
 
 # disable unused services
-dmzexec systemctl stop dnsmasq metronome ntp systemd-resolved yunohost-firewall yunohost-api yunomdns
-dmzexec systemctl mask dnsmasq metronome ntp systemd-resolved
+dmzexec systemctl stop dnsmasq metronome ntp systemd-resolved systemd-networkd-wait-online yunohost-firewall yunohost-api yunomdns
+dmzexec systemctl mask dnsmasq metronome ntp systemd-resolved systemd-networkd-wait-online
 # unfortunately we cannot mask those, so diable them
 dmzexec systemctl disable yunohost-firewall yunohost-api yunomdns
 
@@ -584,6 +593,11 @@ dmzexec "yunohost settings set smtp.relay.host -v '$MAIL_RELAY_HOST'"
 dmzexec "yunohost settings set smtp.relay.user -v '$MAIL_RELAY_USER'"
 dmzexec "yunohost settings set smtp.relay.password -v '$MAIL_RELAY_PASS'"
 dmzexec "yunohost settings set smtp.relay.port -v '$MAIL_RELAY_PORT'"
+# workaround postfix permissions issues
+dmzexec chown postfix:root /etc/postfix
+dmzexec postmap /etc/postfix/sasl_passwd
+dmzexec chown root:root /etc/postfix
+dmzexec yunohost tools regen-conf postfix
 
 # setup fail2ban to use iproute2 instead of iptables
 # as rpf is enabled (see sysctl above) incoming packets will be dropped too
@@ -601,6 +615,10 @@ actionunban = ip route del <blocktype> <ip> metric $(echo -n '<name>'|cksum|cut 
 blocktype = blackhole
 EOF
 dmzexec systemctl restart fail2ban
+
+# for some reason we need to manually install sury keys
+# otherwise nextcloud won't install because of failing deps
+dmzexec "wget -nv -O - https://packages.sury.org/php/apt.gpg | apt-key add -"
 
 # install nextcloud into domain.tld/cloud with mail and calendar apps
 dmzexec "yunohost app install nextcloud -a 'domain=$DOMAIN&path=/cloud&admin=$YN_USER&user_home=yes'"
@@ -737,6 +755,9 @@ dmzexec yunohost diagnosis ignore --filter yunohost diagnosis ignore --filter re
 
 ### Finalization
 
+## upgrade...
+upgrade
+
 ## start DMZ at boot
 cat > /etc/rc.local << EOF
 #!/bin/sh
@@ -821,6 +842,7 @@ upgrade() {
 apt-get -y update
 apt-get -y dist-upgrade
 apt-get -y autoremove
+apt-get -y clean
 
 # update yunohost
 dmzexec yunohost tools update
@@ -834,6 +856,7 @@ nextcloud 'app:update --all'
 dmzexec apt-get -y update
 dmzexec apt-get -y dist-upgrade
 dmzexec apt-get -y autoremove
+dmzexec apt-get -y clean
 
 } # end of upgrade
 
