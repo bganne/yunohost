@@ -526,10 +526,6 @@ dmzexec "while [ ! -S /run/systemd/private ]; do sleep 1;done"
 # wait for the system to be ready...
 dmzexec systemctl is-system-running --wait || true
 
-# we do not use those...
-dmzexec systemctl stop systemd-networkd sys-kernel-config.mount sys-kernel-debug.mount
-dmzexec systemctl mask systemd-networkd sys-kernel-config.mount sys-kernel-debug.mount
-
 dmzexec timedatectl set-timezone "$TIMEZONE"
 
 ## install Yunohost with default user
@@ -542,9 +538,14 @@ dmzexec apt-get -y autoremove
 dmzexec "yunohost user info '$YN_USER' 2>&1 >/dev/null || yunohost user create '$YN_USER' --firstname '$YN_USER_FIRST' --lastname '$YN_USER_LAST' --domain '$DOMAIN' -p '$YN_USER_PASS'"
 dmzexec "yunohost user permission add ssh '$YN_USER'"
 
-# disable unused services
-dmzexec systemctl stop dnsmasq metronome ntp systemd-resolved systemd-networkd-wait-online yunohost-firewall yunohost-api yunomdns
-dmzexec systemctl mask dnsmasq metronome ntp systemd-resolved systemd-networkd-wait-online
+# disable unused/incompatible services
+dmzexec systemctl stop dnsmasq metronome ntp \
+	sys-kernel-config.mount sys-kernel-debug.mount systemd-journald-audit.socket \
+	systemd-networkd systemd-resolved systemd-networkd-wait-online \
+	yunohost-firewall yunohost-api yunomdns
+dmzexec systemctl mask dnsmasq metronome ntp \
+	sys-kernel-config.mount sys-kernel-debug.mount systemd-journald-audit.socket \
+	systemd-networkd systemd-resolved systemd-networkd-wait-online
 # unfortunately we cannot mask those, so diable them
 dmzexec systemctl disable yunohost-firewall yunohost-api yunomdns
 
