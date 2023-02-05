@@ -70,7 +70,7 @@ dmzexec()
 # helper to run occ commands in the container
 nextcloud()
 {
-	dmzexec "cd /var/www/nextcloud && sudo -u nextcloud php8.0 --define apc.enable_cli=1 occ $*"
+	dmzexec "cd /var/www/nextcloud && sudo -u nextcloud php8.1 --define apc.enable_cli=1 occ $*"
 }
 
 # helper to create a new file in DMZ
@@ -511,10 +511,6 @@ net.ipv4.tcp_dsack=1
 net.ipv4.tcp_fastopen=1027
 EOF
 
-# workaround fail2ban: make sure auth.log exists
-dmzcat 600 /var/log/auth.log << EOF
-EOF
-
 # make sure networkd will not mess up the network
 ln -sf /dev/null "$DMZ_ROOTFS/etc/systemd/system/systemd-networkd.service"
 
@@ -529,14 +525,10 @@ dmzexec systemctl is-system-running --wait || true
 dmzexec timedatectl set-timezone "$TIMEZONE"
 
 ## install Yunohost with default user
-dmzexec apt-get -y install wget fetchmail logwatch
-dmzexec "[ -x /usr/bin/yunohost ] || wget -O- 'https://install.yunohost.org' | bash -s -- -a"
-dmzexec "yunohost tools --help 2>&1 >/dev/null || yunohost tools postinstall --domain '$DOMAIN' --password '$YN_ADMIN_PASS' --ignore-dyndns"
+dmzexec apt-get -y install fetchmail logwatch curl
+dmzexec "[ -x /usr/bin/yunohost ] || curl 'https://install.yunohost.org' | bash -s -- -a"
+dmzexec "yunohost tools --help 2>&1 >/dev/null || yunohost tools postinstall --domain '$DOMAIN' --user '$YN_USER' --fullname '$YN_USER_FIRST $YN_USER_LAST' --password '$YN_ADMIN_PASS' --ignore-dyndns"
 dmzexec apt-get -y autoremove
-
-# add default user & allow ssh
-dmzexec "yunohost user info '$YN_USER' 2>&1 >/dev/null || yunohost user create '$YN_USER' --firstname '$YN_USER_FIRST' --lastname '$YN_USER_LAST' --domain '$DOMAIN' -p '$YN_USER_PASS'"
-dmzexec "yunohost user permission add ssh '$YN_USER'"
 
 # disable unused/incompatible services
 dmzexec systemctl stop dnsmasq metronome ntp \
@@ -553,10 +545,13 @@ dmzexec systemctl disable yunohost-firewall yunohost-api yunomdns
 dmz_resolvconf
 
 # disable ssowat overlay
-dmzexec yunohost settings set ssowat.panel_overlay.enabled -v false
+dmzexec yunohost settings set ssowat.panel_overlay.enabled -v no
 
 # harden security
-dmzexec yunohost settings set security.experimental.enabled -v true
+dmzexec yunohost settings set security.experimental.enabled -v yes
+
+# disable xmpp
+dmzexec "yunohost domain config set '$DOMAIN' feature.xmpp.xmpp -v no"
 
 # setup yunohost config hooks to tweak conf automatically
 mkdir -p "$DMZ_ROOTFS/etc/yunohost/hooks.d/conf_regen"
@@ -590,15 +585,11 @@ sed -e 's/^AllowGroups .*$/AllowUsers $YN_USER/' \
 EOF
 
 # fixup postfix to relay through gandi mail
-dmzexec "yunohost settings set smtp.relay.host -v '$MAIL_RELAY_HOST'"
-dmzexec "yunohost settings set smtp.relay.user -v '$MAIL_RELAY_USER'"
-dmzexec "yunohost settings set smtp.relay.password -v '$MAIL_RELAY_PASS'"
-dmzexec "yunohost settings set smtp.relay.port -v '$MAIL_RELAY_PORT'"
-# workaround postfix permissions issues
-dmzexec chown postfix:root /etc/postfix
-dmzexec postmap /etc/postfix/sasl_passwd
-dmzexec chown root:root /etc/postfix
-dmzexec yunohost tools regen-conf postfix
+dmzexec "yunohost settings set email.smtp.smtp_relay_enabled -v yes"
+dmzexec "yunohost settings set email.smtp.smtp_relay_host -v '$MAIL_RELAY_HOST'"
+dmzexec "yunohost settings set email.smtp.smtp_relay_user -v '$MAIL_RELAY_USER'"
+dmzexec "yunohost settings set email.smtp.smtp_relay_password -v '$MAIL_RELAY_PASS'"
+dmzexec "yunohost settings set email.smtp.smtp_relay_port -v '$MAIL_RELAY_PORT'"
 
 # setup fail2ban to use iproute2 instead of iptables
 # as rpf is enabled (see sysctl above) incoming packets will be dropped too
@@ -619,7 +610,7 @@ dmzexec systemctl restart fail2ban
 
 # for some reason we need to manually install sury keys
 # otherwise nextcloud won't install because of failing deps
-dmzexec "wget -nv -O - https://packages.sury.org/php/apt.gpg | apt-key add -"
+dmzexec "curl https://packages.sury.org/php/apt.gpg | apt-key add -"
 
 # install nextcloud into domain.tld/cloud with mail and calendar apps
 dmzexec "yunohost app install nextcloud -a 'domain=$DOMAIN&path=/cloud&admin=$YN_USER&user_home=yes'"
@@ -649,7 +640,7 @@ nextcloud "config:app:set previewgenerator widthSizes  --value='256 384'"
 nextcloud "config:app:set previewgenerator heightSizes --value='256'"
 nextcloud "config:app:set preview jpeg_quality --value='60'"
 dmzcat 644 /etc/cron.d/99-nextcloud-preview << EOF
-*/15  *  *  *  * nextcloud /usr/bin/php8.0 --define apc.enable_cli=1 /var/www/nextcloud/occ preview:pre-generate
+*/15  *  *  *  * nextcloud /usr/bin/php8.1 --define apc.enable_cli=1 /var/www/nextcloud/occ preview:pre-generate
 EOF
 
 # scan data and generate preview if any
