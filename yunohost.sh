@@ -247,7 +247,6 @@ readonly YN_ADMIN_PASS="$(getpass "Yunohost admin password")"
 readonly YN_USER_PASS="$(getpass "Yunohost user '$YN_USER' password")"
 readonly MAIL_RELAY_PASS="$(getpass "Mail relay user '$MAIL_RELAY_USER' password")"
 readonly BORG_PASSPHRASE="$(getpass "Borg backup passphrase")"
-export BORG_PASSPHRASE
 
 ### Setup host
 
@@ -405,9 +404,11 @@ dpkg-reconfigure -f noninteractive unattended-upgrades
 
 ## setup borg
 # use encryption for remote backups though
+export $BORG_PASSPHRASE
 borg info "$DATA_BACKUP" || borg init --make-parent-dirs --encryption=repokey-blake2 "$DATA_BACKUP"
 borg key export "$DATA_BACKUP" /root/borg.key
 echo "$BORG_PASSPHRASE" > /root/borg.pass
+unset BORG_PASSPHRASE
 chmod 400 /root/borg.key /root/borg.pass
 ## setup daily backups
 cat > /etc/cron.daily/backup << EOF
@@ -787,8 +788,7 @@ borg_backup() {
 	local repo="$1"; shift
 	# borg on host will backup home and mail
 	# yunohost backups are put in home and will be backuped by borg
-	BORG_PASSPHRASE="$(cat /root/borg.pass)"
-	export BORG_PASSPHRASE
+	export BORG_PASSPHRASE="$(cat /root/borg.pass)"
 	borg create "$@" \
 		--verbose \
 		--filter AME \
@@ -802,13 +802,26 @@ borg_backup() {
 		"$repo::{hostname}-{now}" \
 		$DATA_HOME \
 		$DATA_MAIL
-	borg prune --list \
+	borg prune "$@" \
+		--list \
 		--prefix '{hostname}-' \
 		--show-rc \
 		--keep-daily 7 \
 		--keep-weekly 4 \
 		--keep-monthly 6 \
 		"$repo"
+	# sanity check for backup: extract the system.info.json (ynh system backup
+	# infos) of the latest archive and check its md5 against the local one
+	# if same: success - if different: failure
+	local file="$DATA_HOME/yunohost.backup/archives/system.info.json"
+	borg extract "$@" \
+		--stdout \
+		"$repo::$(borg list --sort timestamp --format '{name}' --last 1 "$repo")" \
+		"${file#/}" \
+		| md5sum | awk "{print \$1, \"$file\"}" | md5sum -c
+	ret=$?
+	unset BORG_PASSPHRASE
+	return $ret
 }
 
 backup() {
