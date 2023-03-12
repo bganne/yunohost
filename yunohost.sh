@@ -625,6 +625,9 @@ nextcloud "config:system:set mysql.utf8mb4 --type boolean --value=true"
 nextcloud "maintenance:repair"
 nextcloud "maintenance:mode --off"
 
+# enable files refresh
+nextcloud "config:system:set filesystem_check_changes --value 1"
+
 # install calendar, contacts and mail apps
 nextcloud "app:install calendar"
 nextcloud "app:install contacts"
