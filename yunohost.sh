@@ -269,6 +269,8 @@ net.ipv4.tcp_sack=1
 net.ipv4.tcp_dsack=1
 # enable TCP fastopen
 net.ipv4.tcp_fastopen=1027
+# enable BBR
+net.ipv4.tcp_congestion_control=bbr
 EOF
 sysctl -p /etc/sysctl.conf
 
@@ -510,6 +512,8 @@ net.ipv4.tcp_sack=1
 net.ipv4.tcp_dsack=1
 # enable TCP fastopen
 net.ipv4.tcp_fastopen=1027
+# enable BBR
+net.ipv4.tcp_congestion_control=bbr
 EOF
 
 # make sure networkd will not mess up the network
