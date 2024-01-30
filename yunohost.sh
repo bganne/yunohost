@@ -244,7 +244,6 @@ rm -f "/var/run/netns/$nspid"
 provision() {
 
 # get passwords
-readonly YN_ADMIN_PASS="$(getpass "Yunohost admin password")"
 readonly YN_USER_PASS="$(getpass "Yunohost user '$YN_USER' password")"
 readonly MAIL_RELAY_PASS="$(getpass "Mail relay user '$MAIL_RELAY_USER' password")"
 # readonly var connect be unset...
@@ -473,7 +472,7 @@ EOF
 
 ## create container
 lxc-info -n "$DMZ_NAME" ||
-	lxc-create -n "$DMZ_NAME" -t download -- -d debian -r bullseye -a amd64
+	lxc-create -n "$DMZ_NAME" -t download -- -d debian -r bookworm -a amd64
 
 # add bind mount for /home and /var/mail
 mkdir -p "$DATA_HOME" "$DATA_MAIL"
@@ -541,32 +540,36 @@ dmzexec timedatectl set-timezone "$TIMEZONE"
 
 ## install Yunohost with default user
 dmzexec apt-get -y install fetchmail logwatch curl
-dmzexec "[ -x /usr/bin/yunohost ] || curl 'https://install.yunohost.org' | sed 's/check_connection 30/true/' | bash -s -- -a"
-dmzexec "yunohost tools --help 2>&1 >/dev/null || yunohost tools postinstall --domain '$DOMAIN' --user '$YN_USER' --fullname '$YN_USER_FIRST $YN_USER_LAST' --password '$YN_ADMIN_PASS' --ignore-dyndns"
+dmzexec "[ -x /usr/bin/yunohost ] || curl 'https://install.yunohost.org' | bash -s -- -a"
+dmzexec "yunohost tools --help 2>&1 >/dev/null || yunohost tools postinstall --domain '$DOMAIN' --user '$YN_USER' --fullname '$YN_USER_FIRST $YN_USER_LAST' --password '$YN_USER_PASS' --ignore-dyndns"
 dmzexec apt-get -y autoremove
 
+# ipv4 only...
+dmzexec yunohost settings set misc.network.dns_exposure -v ipv4
+# harden security
+dmzexec yunohost settings set security.experimental.security_experimental_enabled -v yes
+# main user can ssh
+dmzexec yunohost user permission add ssh.main "$YN_USER"
+# add missing mail aliases for admins
+dmzexec yunohost user group add-mailalias admins "root@$DOMAIN" "postmaster@$DOMAIN"
+
 # disable unused/incompatible services
-dmzexec systemctl stop dnsmasq metronome ntp haveged \
-	sys-kernel-config.mount sys-kernel-debug.mount systemd-journald-audit.socket \
-	systemd-networkd systemd-resolved systemd-networkd-wait-online \
-	yunohost-firewall yunohost-api yunomdns
-dmzexec systemctl mask dnsmasq metronome ntp haveged \
-	sys-kernel-config.mount sys-kernel-debug.mount systemd-journald-audit.socket \
-	systemd-networkd systemd-resolved systemd-networkd-wait-online
-# unfortunately we cannot mask those, so disable them
-dmzexec systemctl disable yunohost-firewall yunohost-api yunomdns
+dmzexec apt-get -y purge systemd-resolved
+dmzexec systemctl stop dnsmasq ntpsec sys-kernel-config.mount \
+	sys-kernel-debug.mount systemd-journald-audit.socket \
+	systemd-networkd systemd-networkd-wait-online haveged \
+	yunohost-firewall yunohost-api yunomdns yunohost-portal-api
+dmzexec systemctl mask dnsmasq ntpsec sys-kernel-config.mount \
+	sys-kernel-debug.mount systemd-journald-audit.socket \
+	systemd-networkd systemd-networkd-wait-online haveged
+# force mask
+ln -sf /dev/null "$DMZ_ROOTFS/etc/systemd/system/yunohost-firewall.service"
+ln -sf /dev/null "$DMZ_ROOTFS/etc/systemd/system/yunohost-api.service"
+ln -sf /dev/null "$DMZ_ROOTFS/etc/systemd/system/yunohost-portal-api.service"
+ln -sf /dev/null "$DMZ_ROOTFS/etc/systemd/system/yunomdns.service"
 
 # update resolv.conf again: avoid brain damage by resolvconf
 dmz_resolvconf
-
-# disable ssowat overlay
-dmzexec yunohost settings set ssowat.panel_overlay.enabled -v no
-
-# harden security
-dmzexec yunohost settings set security.experimental.enabled -v yes
-
-# disable xmpp
-dmzexec "yunohost domain config set '$DOMAIN' feature.xmpp.xmpp -v no"
 
 # setup yunohost config hooks to tweak conf automatically
 mkdir -p "$DMZ_ROOTFS/etc/yunohost/hooks.d/conf_regen"
@@ -598,13 +601,32 @@ sed -e 's/^AllowGroups .*$/AllowUsers $YN_USER/' \
     -e '/PermitRootLogin yes/d'         \
     -i \$ssh_conf
 EOF
+# specialize postfix local networks
+dmzcat 755 /etc/yunohost/hooks.d/conf_regen/99-postfix_fixup << EOF
+#!/bin/bash
+set -eu
+action=\$1
+pending_dir=\$4
+postfix_conf=\$pending_dir/../postfix/etc/postfix/main.cf
+[[ \$action == "pre" ]] || exit 0
+[[ -w \$postfix_conf ]] || exit 1
+# update postfix local networks
+sed -e 's/^mynetworks =.*$/mynetworks = 127.0.0.0\\/8 $LAN_NET4_ADDR\\/$LAN_PREFIX $DMZ_IP4\\/32 $DMZ_GW4\\/32/' \
+    -i \$postfix_conf
+EOF
+# make sure above fixups are applied
+dmzexec yunohost tools regen-conf
 
-# fixup postfix to relay through gandi mail
-dmzexec "yunohost settings set email.smtp.smtp_relay_enabled -v yes"
+# setup mail relay
+# workaround https://github.com/YunoHost/issues/issues/2483
+dmzexec "sed -i.bak '/visible=\"smtp_relay_enabled\"/d' /usr/share/yunohost/config_global.toml"
+dmzexec "yunohost settings set email.smtp.smtp_relay_enabled -v true"
 dmzexec "yunohost settings set email.smtp.smtp_relay_host -v '$MAIL_RELAY_HOST'"
 dmzexec "yunohost settings set email.smtp.smtp_relay_user -v '$MAIL_RELAY_USER'"
 dmzexec "yunohost settings set email.smtp.smtp_relay_password -v '$MAIL_RELAY_PASS'"
 dmzexec "yunohost settings set email.smtp.smtp_relay_port -v '$MAIL_RELAY_PORT'"
+# remove workaround for https://github.com/YunoHost/issues/issues/2483
+dmzexec "mv -vf /usr/share/yunohost/config_global.toml.bak /usr/share/yunohost/config_global.toml"
 
 # setup fail2ban to use iproute2 instead of iptables
 # as rpf is enabled (see sysctl above) incoming packets will be dropped too
@@ -623,9 +645,8 @@ blocktype = blackhole
 EOF
 dmzexec systemctl restart fail2ban
 
-# for some reason we need to manually install sury keys
-# otherwise nextcloud won't install because of failing deps
-dmzexec "curl https://packages.sury.org/php/apt.gpg | apt-key add -"
+# install rspamd
+dmzexec yunohost app install rspamd
 
 # install nextcloud into domain.tld/cloud with mail and calendar apps
 dmzexec "yunohost app install nextcloud -a 'domain=$DOMAIN&path=/cloud&admin=$YN_USER&user_home=yes'"
@@ -705,7 +726,6 @@ dmzexec systemctl reload nginx
 # fetchmail use vmail user and its homedir is set to /var/vmail
 # unfortunately that does not exist and confuses fetchmail
 mkdir -p "$DMZ_ROOTFS/var/vmail"
-chown 100000:100000 "$DMZ_ROOTFS/var/vmail"
 dmzexec chown vmail:mail /var/vmail
 
 dmzcat 600 /etc/fetchmailrc << EOF
@@ -745,27 +765,15 @@ EOF
 
 # disable annoying warnings
 dmzexec yunohost diagnosis run
-dmzexec yunohost diagnosis ignore --filter ip test=dnsresolv || true
-dmzexec yunohost diagnosis ignore --filter ip test=ipv6 || true
-dmzexec yunohost diagnosis ignore --filter dnsrecords category=mail domain=$DOMAIN || true
-dmzexec yunohost diagnosis ignore --filter dnsrecords category=xmpp domain=$DOMAIN || true
-dmzexec yunohost diagnosis ignore --filter dnsrecords category=extra domain=$DOMAIN || true
-dmzexec yunohost diagnosis ignore --filter ports category=xmpp service=metronome || true
-dmzexec yunohost diagnosis ignore --filter ports port=5222 || true
-dmzexec yunohost diagnosis ignore --filter ports port=5269 || true
-dmzexec yunohost diagnosis ignore --filter web test=hairpinning || true
-dmzexec yunohost diagnosis ignore --filter mail test=mail_fcrdns || true
-dmzexec yunohost diagnosis ignore --filter services service=dnsmasq || true
-dmzexec yunohost diagnosis ignore --filter services service=metronome || true
-dmzexec yunohost diagnosis ignore --filter services service=yunohost-firewall || true
-dmzexec yunohost diagnosis ignore --filter services service=yunohost-api || true
-dmzexec yunohost diagnosis ignore --filter services service=yunomdns || true
-dmzexec yunohost diagnosis ignore --filter mail test=mail_blacklist || true
-dmzexec yunohost diagnosis ignore --filter mail test=mail_queue || true
-dmzexec yunohost diagnosis ignore --filter basesystem test=high_number_auth_failure || true
-dmzexec yunohost diagnosis ignore --filter yunohost diagnosis ignore --filter regenconf file=/etc/postfix/sasl_passwd.db || true
-dmzexec yunohost diagnosis ignore --filter yunohost diagnosis ignore --filter regenconf file=/etc/systemd/system/yunohost-api.service || true
-dmzexec yunohost diagnosis ignore --filter yunohost diagnosis ignore --filter regenconf file=/etc/systemd/system/yunohost-firewall.service || true
+dmzexec yunohost diagnosis ignore --filter services service=dnsmasq
+dmzexec yunohost diagnosis ignore --filter services service=yunohost-firewall
+dmzexec yunohost diagnosis ignore --filter services service=yunohost-api
+dmzexec yunohost diagnosis ignore --filter services service=yunohost-portal-api
+dmzexec yunohost diagnosis ignore --filter services service=yunomdns
+dmzexec yunohost diagnosis ignore --filter yunohost diagnosis ignore --filter regenconf file=/etc/systemd/system/yunomdns.service
+dmzexec yunohost diagnosis ignore --filter yunohost diagnosis ignore --filter regenconf file=/etc/systemd/system/yunohost-api.service
+dmzexec yunohost diagnosis ignore --filter yunohost diagnosis ignore --filter regenconf file=/etc/systemd/system/yunohost-firewall.service
+dmzexec yunohost diagnosis ignore --filter yunohost diagnosis ignore --filter regenconf file=/etc/systemd/system/yunohost-portal-api.service
 
 ### Finalization
 
