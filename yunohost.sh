@@ -620,11 +620,11 @@ EOF
 dmzexec yunohost tools regen-conf
 
 # fixup postfix to relay through gandi mail
-dmzexec "yunohost settings set email.smtp.smtp_relay_enabled -v yes"
-dmzexec "yunohost settings set email.smtp.smtp_relay_host -v '$MAIL_RELAY_HOST'"
-dmzexec "yunohost settings set email.smtp.smtp_relay_user -v '$MAIL_RELAY_USER'"
-dmzexec "yunohost settings set email.smtp.smtp_relay_password -v '$MAIL_RELAY_PASS'"
-dmzexec "yunohost settings set email.smtp.smtp_relay_port -v '$MAIL_RELAY_PORT'"
+#dmzexec "yunohost settings set email.smtp.smtp_relay_enabled -v yes"
+#dmzexec "yunohost settings set email.smtp.smtp_relay_host -v '$MAIL_RELAY_HOST'"
+#dmzexec "yunohost settings set email.smtp.smtp_relay_user -v '$MAIL_RELAY_USER'"
+#dmzexec "yunohost settings set email.smtp.smtp_relay_password -v '$MAIL_RELAY_PASS'"
+#dmzexec "yunohost settings set email.smtp.smtp_relay_port -v '$MAIL_RELAY_PORT'"
 
 # setup fail2ban to use iproute2 instead of iptables
 # as rpf is enabled (see sysctl above) incoming packets will be dropped too
