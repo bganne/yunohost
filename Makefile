@@ -1,5 +1,6 @@
-IMAGE=debian-11-generic-amd64.qcow2
-URL=https://cdimage.debian.org/cdimage/cloud/bullseye/latest
+IMAGE=debian-12-generic-amd64.qcow2
+URL=https://cdimage.debian.org/cdimage/cloud/bookworm/latest
+LOCALHOST=127.1.1.1
 
 all: run
 
@@ -29,13 +30,13 @@ run: sys.qcow2 data.qcow2 cloud-init.raw FORCE
 		-drive file="data.qcow2",index=1,format=qcow2,cache=none,aio=io_uring,if=virtio \
 		-drive file="cloud-init.raw",index=2,format=raw,cache=none,aio=io_uring,if=virtio \
 		-virtfs local,path="$(shell pwd)",mount_tag=host,readonly=on,security_model=none \
-		-nic user,model=virtio,hostfwd=tcp::5555-:22
+		-nic user,model=virtio,hostfwd=tcp:$(LOCALHOST):2222-:22,hostfwd=tcp:$(LOCALHOST):4443-:443
 
 ssh: FORCE
-	ssh -i id_debian_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p5555 debian@localhost
+	ssh -i id_debian_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p2222 debian@$(LOCALHOST)
 
 provision: FORCE
-	ssh -i id_debian_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p5555 -t debian@localhost sudo /host/yunohost.sh provision
+	ssh -i id_debian_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p2222 -t debian@$(LOCALHOST) sudo /host/yunohost.sh provision
 
 mon: FORCE
 	telnet localhost 1111

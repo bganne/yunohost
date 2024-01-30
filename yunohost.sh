@@ -11,7 +11,8 @@ readonly LAN=ens3
 readonly LAN_IP4="10.0.2.15"
 readonly LAN_GW4="10.0.2.2"
 readonly LAN_PREFIX="24"
-readonly LAN_NET4="10.0.2.0/$LAN_PREFIX"
+readonly LAN_NET4_ADDR="10.0.2.0"
+readonly LAN_NET4="$LAN_NET4_ADDR/$LAN_PREFIX"
 
 readonly HOST_NAME=host
 readonly HOST_FQDN="$HOST_NAME.$DOMAIN"
@@ -277,10 +278,15 @@ sysctl -p /etc/sysctl.conf
 
 ## minimal static network config to get basic internet connectivity
 
-# just in case this stupid tool is there...
-apt-get -y purge resolvconf || true
+# replace "modern" linux networking with something saner...
+apt-get -y update
+apt-get -y install ifupdown
+apt-get -y purge resolvconf systemd-timesyncd systemd-resolved
+systemctl stop systemd-networkd.socket systemd-networkd
+systemctl mask systemd-networkd.socket systemd-networkd
 
 # configure DNS (will be overriden by dnsmasq later)
+rm -f /etc/resolv.conf
 cat > /etc/resolv.conf << EOF
 # Cloudflare
 nameserver 1.1.1.1
@@ -292,7 +298,6 @@ EOF
 echo "$HOST_FQDN" > /etc/hostname
 
 # setup network
-ifdown $LAN || true
 cat > /etc/network/interfaces << EOF
 auto lo
 iface lo inet loopback
@@ -306,6 +311,7 @@ iface $LAN inet static
 	ethernet-pause-rx off
 	ethernet-pause-tx off
 EOF
+ifdown $LAN || true
 
 # reload network config
 hostname -F /etc/hostname
@@ -367,7 +373,7 @@ address=/use-application-dns.net/
 EOF
 
 # move DNS conf to be served by dnsmasq
-mv /etc/resolv.conf /etc/resolv.dnsmasq
+cp /etc/resolv.conf /etc/resolv.dnsmasq
 
 # hosts file: this will be served by dnsmasq
 cat > /etc/hosts << EOF
@@ -467,7 +473,7 @@ EOF
 
 ## create container
 lxc-info -n "$DMZ_NAME" ||
-	lxc-create -n "$DMZ_NAME" -t download -- -d debian -r bullseye -a amd64 --keyserver keyserver.ubuntu.com
+	lxc-create -n "$DMZ_NAME" -t download -- -d debian -r bullseye -a amd64
 
 # add bind mount for /home and /var/mail
 mkdir -p "$DATA_HOME" "$DATA_MAIL"
