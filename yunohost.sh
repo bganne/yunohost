@@ -539,7 +539,7 @@ dmzexec timedatectl set-timezone "$TIMEZONE"
 
 ## install Yunohost with default user
 dmzexec apt-get -y install fetchmail logwatch curl
-dmzexec "[ -x /usr/bin/yunohost ] || curl 'https://install.yunohost.org' | bash -s -- -a"
+dmzexec "[ -x /usr/bin/yunohost ] || curl 'https://install.yunohost.org/bookworm' | bash -s -- -a -d unstable"
 dmzexec "yunohost tools --help 2>&1 >/dev/null || yunohost tools postinstall --domain '$DOMAIN' --user '$YN_USER' --fullname '$YN_USER_FIRST $YN_USER_LAST' --password '$YN_USER_PASS' --ignore-dyndns"
 dmzexec apt-get -y autoremove
 
