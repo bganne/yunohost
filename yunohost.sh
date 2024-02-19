@@ -301,6 +301,9 @@ auto $LAN
 iface $LAN inet static
 	address $LAN_IP4/$LAN_PREFIX
 	gateway $LAN_GW4
+	ethernet-pause-autoneg off
+	ethernet-pause-rx off
+	ethernet-pause-tx off
 EOF
 
 # reload network config
