@@ -636,10 +636,11 @@ nextcloud "maintenance:mode --off"
 # enable files refresh
 nextcloud "config:system:set filesystem_check_changes --value 1"
 
-# install calendar, contacts and mail apps
+# install calendar, contacts, mail and guests apps
 nextcloud "app:install calendar"
 nextcloud "app:install contacts"
 nextcloud "app:install mail"
+nextcloud "app:install guests"
 
 # install and configure previews
 nextcloud "app:install previewgenerator"
