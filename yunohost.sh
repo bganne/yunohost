@@ -641,6 +641,7 @@ nextcloud "app:install calendar"
 nextcloud "app:install contacts"
 nextcloud "app:install mail"
 nextcloud "app:install guests"
+nextcloud "app:install notes"
 
 # install and configure previews
 nextcloud "app:install previewgenerator"
