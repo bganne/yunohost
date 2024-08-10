@@ -535,7 +535,7 @@ dmzexec timedatectl set-timezone "$TIMEZONE"
 
 ## install Yunohost with default user
 dmzexec apt-get -y install fetchmail logwatch curl
-dmzexec "[ -x /usr/bin/yunohost ] || curl 'https://install.yunohost.org' | bash -s -- -a"
+dmzexec "[ -x /usr/bin/yunohost ] || curl 'https://install.yunohost.org' | sed 's/check_connection 30/true/' | bash -s -- -a"
 dmzexec "yunohost tools --help 2>&1 >/dev/null || yunohost tools postinstall --domain '$DOMAIN' --user '$YN_USER' --fullname '$YN_USER_FIRST $YN_USER_LAST' --password '$YN_ADMIN_PASS' --ignore-dyndns"
 dmzexec apt-get -y autoremove
 
@@ -698,10 +698,11 @@ dmzexec systemctl reload nginx
 
 ## setup fetchmail
 
-# fetchmail use vmail user and its homedire is set to /var/vmail
+# fetchmail use vmail user and its homedir is set to /var/vmail
 # unfortunately that does not exist and confuses fetchmail
 mkdir -p "$DMZ_ROOTFS/var/vmail"
-chown --reference="$DATA_MAIL/$YN_USER" "$DMZ_ROOTFS/var/vmail"
+chown 100000:100000 "$DMZ_ROOTFS/var/vmail"
+dmzexec chown vmail:mail /var/vmail
 
 dmzcat 600 /etc/fetchmailrc << EOF
 defaults ssl fetchall nokeep mda "/usr/lib/dovecot/deliver -d %T"
@@ -714,7 +715,7 @@ poll $MAIL_IMAP_HOST with proto imap port 993 and timeout 120
 	user '$YN_USER@$DOMAIN' with pass "$YN_USER_PASS" is '$YN_USER' here
 	user '$MAIL_RELAY_USER' with pass "$MAIL_RELAY_PASS" is '$YN_USER' here
 EOF
-chown --reference="$DATA_MAIL/$YN_USER" "$DMZ_ROOTFS/etc/fetchmailrc"
+dmzexec chown vmail:mail /etc/fetchmailrc
 
 dmzcat 644 /etc/default/fetchmail << EOF
 export LC_ALL=C
