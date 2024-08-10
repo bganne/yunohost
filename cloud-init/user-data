@@ -25,7 +25,7 @@ bootcmd:
   - echo 9pnet_virtio >> /etc/initramfs-tools/modules
   - update-initramfs -u
   - mkdir /host /data
-  - echo '/dev/vdb /data ext4 discard,relatime 0 2' >> /etc/fstab
+  - echo '/dev/vdb /data ext4 discard,relatime 0 0' >> /etc/fstab
   - echo 'host /host 9p ro,trans=virtio 0 0' >> /etc/fstab
   - mount -a
   - mkdir /data/host
