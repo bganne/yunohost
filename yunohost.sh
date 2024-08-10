@@ -246,7 +246,8 @@ provision() {
 readonly YN_ADMIN_PASS="$(getpass "Yunohost admin password")"
 readonly YN_USER_PASS="$(getpass "Yunohost user '$YN_USER' password")"
 readonly MAIL_RELAY_PASS="$(getpass "Mail relay user '$MAIL_RELAY_USER' password")"
-readonly BORG_PASSPHRASE="$(getpass "Borg backup passphrase")"
+# readonly var connect be unset...
+BORG_PASSPHRASE="$(getpass "Borg backup passphrase")"
 
 ### Setup host
 
@@ -409,7 +410,7 @@ dpkg-reconfigure -f noninteractive unattended-upgrades
 
 ## setup borg
 # use encryption for remote backups though
-export $BORG_PASSPHRASE
+export BORG_PASSPHRASE
 borg info "$DATA_BACKUP" || borg init --make-parent-dirs --encryption=repokey-blake2 "$DATA_BACKUP"
 borg key export "$DATA_BACKUP" /root/borg.key
 echo "$BORG_PASSPHRASE" > /root/borg.pass
