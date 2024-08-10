@@ -683,6 +683,9 @@ nextcloud "config:import" << EOF
 }
 EOF
 
+# make sure we have all needed indices
+nextcloud "db:add-missing-indices"
+
 # default fcgi timeouts are too low for nextcloud
 dmzcat 644 "/etc/nginx/conf.d/$DOMAIN.d/99-fix-nextcloud-timeouts.conf" << EOF
 proxy_connect_timeout 120s;
