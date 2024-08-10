@@ -70,7 +70,7 @@ dmzexec()
 # helper to run occ commands in the container
 nextcloud()
 {
-	dmzexec "cd /var/www/nextcloud && sudo -u nextcloud php8.2 --define apc.enable_cli=1 occ $*"
+	dmzexec "cd /var/www/nextcloud && sudo -u nextcloud php8.3 --define apc.enable_cli=1 occ $*"
 }
 
 # helper to create a new file in DMZ
@@ -653,7 +653,7 @@ nextcloud "config:app:set previewgenerator widthSizes  --value='256 384'"
 nextcloud "config:app:set previewgenerator heightSizes --value='256'"
 nextcloud "config:app:set preview jpeg_quality --value='60'"
 dmzcat 644 /etc/cron.d/99-nextcloud-preview << EOF
-*/15  *  *  *  * nextcloud /usr/bin/php8.2 --define apc.enable_cli=1 /var/www/nextcloud/occ preview:pre-generate
+*/15  *  *  *  * nextcloud /usr/bin/php8.3 --define apc.enable_cli=1 /var/www/nextcloud/occ preview:pre-generate
 EOF
 
 # scan data and generate preview if any
