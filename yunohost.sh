@@ -540,14 +540,14 @@ dmzexec "yunohost tools --help 2>&1 >/dev/null || yunohost tools postinstall --d
 dmzexec apt-get -y autoremove
 
 # disable unused/incompatible services
-dmzexec systemctl stop dnsmasq metronome ntp \
+dmzexec systemctl stop dnsmasq metronome ntp haveged \
 	sys-kernel-config.mount sys-kernel-debug.mount systemd-journald-audit.socket \
 	systemd-networkd systemd-resolved systemd-networkd-wait-online \
 	yunohost-firewall yunohost-api yunomdns
-dmzexec systemctl mask dnsmasq metronome ntp \
+dmzexec systemctl mask dnsmasq metronome ntp haveged \
 	sys-kernel-config.mount sys-kernel-debug.mount systemd-journald-audit.socket \
 	systemd-networkd systemd-resolved systemd-networkd-wait-online
-# unfortunately we cannot mask those, so diable them
+# unfortunately we cannot mask those, so disable them
 dmzexec systemctl disable yunohost-firewall yunohost-api yunomdns
 
 # update resolv.conf again: avoid brain damage by resolvconf
