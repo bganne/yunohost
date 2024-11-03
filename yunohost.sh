@@ -646,13 +646,11 @@ nextcloud "app:install notes"
 
 # install and configure previews
 nextcloud "app:install previewgenerator"
-nextcloud "config:system:set preview_max_x --value 2048"
-nextcloud "config:system:set preview_max_y --value 2048"
-nextcloud "config:system:set jpeg_quality --value 60"
-nextcloud "config:app:set previewgenerator squareSizes --value='32 256'"
-nextcloud "config:app:set previewgenerator widthSizes  --value='256 384'"
-nextcloud "config:app:set previewgenerator heightSizes --value='256'"
-nextcloud "config:app:set preview jpeg_quality --value='60'"
+nextcloud "config:system:set preview_max_x --value 1024"
+nextcloud "config:system:set preview_max_y --value 1024"
+nextcloud "config:app:set previewgenerator squareSizes --value='64 256'"
+nextcloud "config:app:set previewgenerator widthSizes  --value='1024'"
+nextcloud "config:app:set previewgenerator heightSizes --value='1024'"
 dmzcat 644 /etc/cron.d/99-nextcloud-preview << EOF
 */15  *  *  *  * nextcloud /usr/bin/php8.3 --define apc.enable_cli=1 /var/www/nextcloud/occ preview:pre-generate
 EOF
@@ -871,8 +869,14 @@ dmzexec yunohost tools update
 dmzexec yunohost tools upgrade system
 dmzexec yunohost tools upgrade apps
 
-# update nextcloud apps
+# update nextcloud
 nextcloud 'app:update --all'
+nextcloud db:add-missing-indices
+nextcloud maintenance:mimetype:update-db
+nextcloud maintenance:mimetype:update-js
+nextcloud 'maintenance:mimetype:update-db --repair-filecache'
+nextcloud maintenance:theme:update
+nextcloud sharing:cleanup-remote-storages
 
 # yunohost system update does not update everything
 dmzexec apt-get -y update
@@ -880,7 +884,26 @@ dmzexec apt-get -y dist-upgrade
 dmzexec apt-get -y autoremove
 dmzexec apt-get -y clean
 
+
 } # end of upgrade
+
+#
+# NEXTCLOUD RESCAN
+#
+
+nextcloud_rescan() {
+
+# rescan & cleanup external files
+nextcloud 'files:scan --all'
+nextcloud files:cleanup
+
+# regenerate all previews
+# https://github.com/nextcloud/previewgenerator?tab=readme-ov-file#i-want-to-resetregenerate-all-previews
+rm -rf /home/yunohost.app/nextcloud/data/appdata_*/preview
+nextcloud files:scan-app-data
+nextcloud preview:generate-all
+
+} # end of nextcloud_rescan
 
 #
 # MAIN
@@ -910,8 +933,11 @@ case "${1:-none}" in
 	"upgrade")
 		upgrade
 		;;
+	"nextcloud-rescan")
+		nextcloud_rescan
+		;;
 	*)
-		echo "Usage: $0 <start|stop|restart|provision|backup|firewall|upgrade>" >&2
+		echo "Usage: $0 <start|stop|restart|provision|backup|firewall|upgrade|nextcloud-rescan>" >&2
 		exit 1
 esac
 # redirect stdout to syslog local0.debug
