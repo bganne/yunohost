@@ -880,7 +880,17 @@ apt-get -y clean
 
 # update yunohost
 dmzexec yunohost tools update
+
+# re-enable yunohost-portal-api.service temporarily, see
+# https://github.com/YunoHost/issues/issues/2525
+dmzexec ln -sf /usr/share/yunohost/conf/yunohost/yunohost-portal-api.service /etc/systemd/system/yunohost-portal-api.service
+
 dmzexec yunohost tools upgrade system
+
+# re-disable yunohost-portal-api.service
+dmzexec systemctl stop yunohost-portal-api.service
+systemctl mask -f yunohost-portal-api.service
+
 dmzexec yunohost tools upgrade apps
 
 # update nextcloud
