@@ -862,7 +862,7 @@ yh_backup apps --apps || true
 # yunohost backups are put in home and will be backuped by borg
 borg_backup "$DATA_BACKUP" || true
 # FIXME: enable remote backup
-#borg_backup "$DATA_BACKUP_REMOTE" --remote-path=borg1
+#borg_backup "$DATA_BACKUP_REMOTE" --remote-path=borg12
 
 } # end of backup
 
