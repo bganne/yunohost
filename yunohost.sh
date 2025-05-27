@@ -842,7 +842,7 @@ borg_backup() {
 	local file="$DATA_HOME/yunohost.backup/archives/system.info.json"
 	borg extract "$@" \
 		--stdout \
-		"$repo::$(borg list --sort timestamp --format '{name}' --last 1 "$repo")" \
+		"$repo::$(borg list "$@" --sort timestamp --format '{name}' --last 1 "$repo")" \
 		"${file#/}" \
 		| md5sum | awk "{print \$1, \"$file\"}" | md5sum -c
 	ret=$?
