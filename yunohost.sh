@@ -810,7 +810,7 @@ yh_backup() {
 	dmzexec "BACKUP_CORE_ONLY=1 yunohost backup create -n '$name' $*"
 }
 
-borg_backup() {
+borg_backup__() {
 	local repo="$1"; shift
 	# borg on host will backup home and mail
 	# yunohost backups are put in home and will be backuped by borg
@@ -826,8 +826,8 @@ borg_backup() {
 		--exclude "$DATA_HOME/yunohost.app/nextcloud/data/appdata_*/" \
 		--compression zstd \
 		"$repo::{hostname}-{now}" \
-		$DATA_HOME \
-		$DATA_MAIL
+		"$DATA_HOME" \
+		"$DATA_MAIL"
 	borg prune "$@" \
 		--list \
 		--glob-archives '{hostname}-*' \
@@ -836,19 +836,37 @@ borg_backup() {
 		--keep-weekly 4 \
 		--keep-monthly 6 \
 		"$repo"
+	# 10min partial check
+	borg check --repository-only --max-duration 600 "$repo"
 	# sanity check for backup: extract the system.info.json (ynh system backup
 	# infos) of the latest archive and check its md5 against the local one
 	# if same: success - if different: failure
 	local file="$DATA_HOME/yunohost.backup/archives/system.info.json"
 	borg extract "$@" \
 		--stdout \
-		"$repo::$(borg list "$@" --sort timestamp --format '{name}' --last 1 "$repo")" \
+		"$repo::$(borg list --sort timestamp --format '{name}' --last 1 "$repo")" \
 		"${file#/}" \
 		| md5sum | awk "{print \$1, \"$file\"}" | md5sum -c
 	ret=$?
 	unset BORG_PASSPHRASE
 	return $ret
 }
+
+borg_backup() {
+
+borg_backup__ "$DATA_BACKUP" "$@" || true
+# FIXME: enable remote backup
+#export BORG_REMOTE_PATH=borg12
+#borg_backup__ "$DATA_BACKUP_REMOTE" "$@"
+#unset BORG_REMOTE_PATH
+
+} # end of borg_backup
+
+borg_check() {
+
+borg_backup --dry-run
+
+} # end of borg_check
 
 backup() {
 
@@ -860,9 +878,7 @@ yh_backup apps --apps || true
 
 # borg on host will backup home and mail
 # yunohost backups are put in home and will be backuped by borg
-borg_backup "$DATA_BACKUP" || true
-# FIXME: enable remote backup
-#borg_backup "$DATA_BACKUP_REMOTE" --remote-path=borg12
+borg_backup
 
 } # end of backup
 
@@ -960,8 +976,11 @@ case "${1:-none}" in
 	"nextcloud-rescan")
 		nextcloud_rescan
 		;;
+	"borg-check")
+		borg_check
+		;;
 	*)
-		echo "Usage: $0 <start|stop|restart|provision|backup|firewall|upgrade|nextcloud-rescan>" >&2
+		echo "Usage: $0 <start|stop|restart|provision|backup|firewall|upgrade|nextcloud-rescan|borg-check>" >&2
 		exit 1
 esac
 # redirect stdout to syslog local0.debug
