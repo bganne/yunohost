@@ -946,6 +946,26 @@ nextcloud preview:generate-all
 } # end of nextcloud_rescan
 
 #
+# YNH MULTIMEDIA UPDATE
+#
+
+ynh_multimedia_update() {
+
+local ynh="yunohost.multimedia/share"
+local dmz="/home/$ynh"
+local host="$DATA_HOME/$ynh"
+# reset rights
+chown -R 100000:100000 "$host"
+find "$host" -type f -exec chmod =644 {} \;
+find "$host" -type d -exec chmod =1755 {} \;
+setfacl -R --remove-all "$host"
+# restore ACLs
+dmzexec chown -R root:all_users "$dmz"
+dmzexec "$dmz/ynh_media_update.sh"
+
+} # end of ynh_multimedia_update
+
+#
 # MAIN
 #
 
@@ -979,8 +999,11 @@ case "${1:-none}" in
 	"borg-check")
 		borg_check
 		;;
+	"multimedia-update")
+		ynh_multimedia_update
+		;;
 	*)
-		echo "Usage: $0 <start|stop|restart|provision|backup|firewall|upgrade|nextcloud-rescan|borg-check>" >&2
+		echo "Usage: $0 <start|stop|restart|provision|backup|firewall|upgrade|nextcloud-rescan|borg-check|multimedia-update>" >&2
 		exit 1
 esac
 # redirect stdout to syslog local0.debug
