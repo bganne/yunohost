@@ -74,6 +74,12 @@ nextcloud()
 	dmzexec "cd /var/www/nextcloud && sudo -u nextcloud php8.3 --define apc.enable_cli=1 occ $*"
 }
 
+# help to install nextcloud app if not yet done
+nextcloud_app_install()
+{
+	nextcloud app:getpath "$1" || nextcloud app:install "$1"
+}
+
 # helper to create a new file in DMZ
 dmzcat()
 {
@@ -85,7 +91,8 @@ dmzcat()
 }
 
 # update resolv.conf helper
-dmz_resolvconf() {
+dmz_resolvconf()
+{
 	rm -f "$DMZ_ROOTFS/etc/resolv.conf"
 	dmzcat 644 /etc/resolv.conf << EOF
 domain $DOMAIN
@@ -94,12 +101,20 @@ nameserver $DMZ_GW4
 EOF
 }
 
-idempotent_append() {
+# helper to append data to a file only if not done yet
+idempotent_append()
+{
 	local guard='# yunohost provisioning - do not remove'
 	local file="$1"
 	grep -q -F "$guard" "$1" && file="/dev/null"
 	echo "$guard" >> "$file"
 	cat >> "$file"
+}
+
+# helper to install an app is not there yet
+ynh_app_install()
+{
+	dmzexec "yunohost app info $1 || yunohost app install $*"
 }
 
 #
@@ -558,12 +573,11 @@ dmzexec apt-get -y purge systemd-resolved
 dmzexec systemctl stop dnsmasq ntpsec sys-kernel-config.mount \
 	sys-kernel-debug.mount systemd-journald-audit.socket \
 	systemd-networkd systemd-networkd-wait-online haveged \
-	yunohost-firewall yunohost-api yunomdns yunohost-portal-api
-dmzexec systemctl mask dnsmasq ntpsec sys-kernel-config.mount \
+	yunohost-api yunomdns yunohost-portal-api
+dmzexec systemctl mask -f dnsmasq ntpsec sys-kernel-config.mount \
 	sys-kernel-debug.mount systemd-journald-audit.socket \
 	systemd-networkd systemd-networkd-wait-online haveged
 # force mask
-ln -sf /dev/null "$DMZ_ROOTFS/etc/systemd/system/yunohost-firewall.service"
 ln -sf /dev/null "$DMZ_ROOTFS/etc/systemd/system/yunohost-api.service"
 ln -sf /dev/null "$DMZ_ROOTFS/etc/systemd/system/yunohost-portal-api.service"
 ln -sf /dev/null "$DMZ_ROOTFS/etc/systemd/system/yunomdns.service"
@@ -646,10 +660,10 @@ EOF
 dmzexec systemctl restart fail2ban
 
 # install rspamd
-dmzexec yunohost app install rspamd
+ynh_app_install rspamd
 
 # install nextcloud into domain.tld/cloud with mail and calendar apps
-dmzexec "yunohost app install nextcloud -a 'domain=$DOMAIN&path=/cloud&admin=$YN_USER&user_home=yes'"
+ynh_app_install nextcloud -a "'domain=$DOMAIN&path=/cloud&admin=$YN_USER&user_home=yes'"
 
 # fixup nextcloud db to use 4-byte support
 # https://docs.nextcloud.com/server/stable/admin_manual/configuration_database/mysql_4byte_support.html
@@ -665,14 +679,14 @@ nextcloud "maintenance:mode --off"
 nextcloud "config:system:set filesystem_check_changes --value 1"
 
 # install calendar, contacts, mail and guests apps
-nextcloud "app:install calendar"
-nextcloud "app:install contacts"
-nextcloud "app:install mail"
-nextcloud "app:install guests"
-nextcloud "app:install notes"
+nextcloud_app_install calendar
+nextcloud_app_install contacts
+nextcloud_app_install mail
+nextcloud_app_install guests
+nextcloud_app_install notes
 
 # install and configure previews
-nextcloud "app:install previewgenerator"
+nextcloud_app_install previewgenerator
 nextcloud "config:system:set preview_max_x --value 1024"
 nextcloud "config:system:set preview_max_y --value 1024"
 nextcloud "config:app:set previewgenerator squareSizes --value='64 256'"
@@ -766,13 +780,11 @@ EOF
 # disable annoying warnings
 dmzexec yunohost diagnosis run
 dmzexec yunohost diagnosis ignore --filter services service=dnsmasq
-dmzexec yunohost diagnosis ignore --filter services service=yunohost-firewall
 dmzexec yunohost diagnosis ignore --filter services service=yunohost-api
 dmzexec yunohost diagnosis ignore --filter services service=yunohost-portal-api
 dmzexec yunohost diagnosis ignore --filter services service=yunomdns
 dmzexec yunohost diagnosis ignore --filter yunohost diagnosis ignore --filter regenconf file=/etc/systemd/system/yunomdns.service
 dmzexec yunohost diagnosis ignore --filter yunohost diagnosis ignore --filter regenconf file=/etc/systemd/system/yunohost-api.service
-dmzexec yunohost diagnosis ignore --filter yunohost diagnosis ignore --filter regenconf file=/etc/systemd/system/yunohost-firewall.service
 dmzexec yunohost diagnosis ignore --filter yunohost diagnosis ignore --filter regenconf file=/etc/systemd/system/yunohost-portal-api.service
 
 ### Finalization
