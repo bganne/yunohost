@@ -555,7 +555,7 @@ dmzexec timedatectl set-timezone "$TIMEZONE"
 
 ## install Yunohost with default user
 dmzexec apt-get -y install fetchmail logwatch curl
-dmzexec "[ -x /usr/bin/yunohost ] || curl 'https://install.yunohost.org' | bash -s -- -a"
+dmzexec "[ -x /usr/bin/yunohost ] || curl 'https://raw.githubusercontent.com/YunoHost/install_script/main/trixie' | bash -s -- -d unstable -a"
 dmzexec "yunohost tools --help 2>&1 >/dev/null || yunohost tools postinstall --domain '$DOMAIN' --user '$YN_USER' --fullname '$YN_USER_FIRST $YN_USER_LAST' --password '$YN_USER_PASS' --ignore-dyndns"
 dmzexec apt-get -y autoremove
 
@@ -666,7 +666,8 @@ EOF
 dmzexec systemctl restart fail2ban
 
 # install rspamd
-ynh_app_install rspamd
+# FIXME: broken on trixie
+#ynh_app_install rspamd
 
 # install nextcloud into domain.tld/cloud with mail and calendar apps
 ynh_app_install nextcloud -a "'domain=$DOMAIN&path=/cloud&admin=$YN_USER&user_home=yes'"
