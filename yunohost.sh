@@ -267,7 +267,7 @@ BORG_PASSPHRASE="$(getpass "Borg backup passphrase")"
 ### Setup host
 
 ## sysctl network settings for the host
-idempotent_append /etc/sysctl.conf << EOF
+idempotent_append /etc/sysctl.d/99-local.conf << EOF
 # disable ipv6 - I know, I know...
 net.ipv6.conf.all.disable_ipv6=1
 # harden ipv4 stack
@@ -288,7 +288,7 @@ net.ipv4.tcp_fastopen=1027
 # enable BBR
 net.ipv4.tcp_congestion_control=bbr
 EOF
-sysctl -p /etc/sysctl.conf
+sysctl -p /etc/sysctl.d/99-local.conf
 
 ## minimal static network config to get basic internet connectivity
 
@@ -487,7 +487,7 @@ EOF
 
 ## create container
 lxc-info -n "$DMZ_NAME" ||
-	lxc-create -n "$DMZ_NAME" -t download -- -d debian -r bookworm -a amd64
+	lxc-create -n "$DMZ_NAME" -t download -- -d debian -r trixie -a amd64
 
 # add bind mount for /home and /var/mail
 mkdir -p "$DATA_HOME" "$DATA_MAIL"
@@ -518,7 +518,7 @@ EOF
 dmz_resolvconf
 
 ## sysctl network settings for the container
-idempotent_append "$DMZ_ROOTFS/etc/sysctl.conf" << EOF
+idempotent_append "$DMZ_ROOTFS/etc/sysctl.d/99-local.conf" << EOF
 # disable ipv6 - I know, I know...
 net.ipv6.conf.all.disable_ipv6=1
 # harden ipv4 stack
@@ -570,7 +570,7 @@ dmzexec yunohost user group add-mailalias admins "root@$DOMAIN" "postmaster@$DOM
 
 # disable unused/incompatible services
 dmzexec apt-get -y purge systemd-resolved
-dmzexec systemctl stop dnsmasq ntpsec sys-kernel-config.mount \
+dmzexec systemctl stop dnsmasq sys-kernel-config.mount \
 	sys-kernel-debug.mount systemd-journald-audit.socket \
 	systemd-networkd systemd-networkd-wait-online haveged \
 	yunohost-api yunomdns yunohost-portal-api
@@ -579,8 +579,10 @@ dmzexec systemctl mask -f dnsmasq ntpsec sys-kernel-config.mount \
 	systemd-networkd systemd-networkd-wait-online haveged
 # force mask
 ln -sf /dev/null "$DMZ_ROOTFS/etc/systemd/system/yunohost-api.service"
-ln -sf /dev/null "$DMZ_ROOTFS/etc/systemd/system/yunohost-portal-api.service"
 ln -sf /dev/null "$DMZ_ROOTFS/etc/systemd/system/yunomdns.service"
+# we'll force mask yunohost-portal-api later,
+# see https://github.com/YunoHost/issues/issues/2525
+#ln -sf /dev/null "$DMZ_ROOTFS/etc/systemd/system/yunohost-portal-api.service"
 
 # update resolv.conf again: avoid brain damage by resolvconf
 dmz_resolvconf
@@ -630,6 +632,10 @@ sed -e 's/^mynetworks =.*$/mynetworks = 127.0.0.0\\/8 $LAN_NET4_ADDR\\/$LAN_PREF
 EOF
 # make sure above fixups are applied
 dmzexec yunohost tools regen-conf
+
+# only force mask now after regen-conf
+# see https://github.com/YunoHost/issues/issues/2525
+ln -sf /dev/null "$DMZ_ROOTFS/etc/systemd/system/yunohost-portal-api.service"
 
 # setup mail relay
 # workaround https://github.com/YunoHost/issues/issues/2483
