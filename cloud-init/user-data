@@ -3,17 +3,12 @@
 users:
   - name: debian
     sudo: ALL=(ALL) NOPASSWD:ALL
-    groups: users, admin
-    home: /home/debian
+    groups: [users, admin]
     shell: /bin/bash
     lock_passwd: false
-    ssh-authorized-keys:
+    passwd: "$y$j9T$Xms0fhqr/cqGpdLN12H13.$PfzjqEBvNQrKakBVvidY2DdKBi9mapYjLepqtiqDL4A"
+    ssh_authorized_keys:
       - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCx8UVdei/dzJuOTFiGd7SWjaG+rZOGKxGldtnK3lUYT+HM0UTi/+F5N40wylSP5tmQ/9e6GVcTJlfcm099kwPGUkx7RMPZLbyB8il3nYv/r7604jHJNAM+IS//YIaV9t56EMjjk4Q+gDls9cX9vjDsGWrBR17C6fdtBknKgtE6HnHcaD0sLpsTNq3oQBFAwN9bn4hb5EHRHix31gY0NKA5CdElFLZc3kl+tdNe1GCRITyyQz8MtSU4BkXY04cxZfFAion24FLHQZ5hvFy2FGWYOdj1Q8luIV1nWxGI9ntDzEhj2dejufnqdIps/qXjb3VbJfWstdoYVlFEVe8H0SCFaa+o+b5AkfWY7caQAv3QBzd3oxZ8/PfDWBTavlSelrdIxVBMpDRR6DufysMsOCzw0/eYk9+nMbMRjWk8cqX9jB4XzI443QVss8UcRIdG7zHE3S15dcPUjUQb0JQb84dWBWVQN3FcU73a88fMTLDsYEn6pHfFm2eOzMBy3WMFyu0= ben@erebor
-
-chpasswd:
-  list: |
-     debian:debian
-  expire: False
 
 ssh_pwauth: False
 

@@ -1,5 +1,5 @@
-IMAGE=debian-12-generic-amd64.qcow2
-URL=https://cdimage.debian.org/cdimage/cloud/bookworm/latest
+IMAGE=debian-13-generic-amd64.qcow2
+URL=https://cdimage.debian.org/cdimage/cloud/trixie/latest
 LOCALHOST=127.1.1.1
 
 all: run
