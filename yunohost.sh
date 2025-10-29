@@ -917,7 +917,7 @@ dmzexec yunohost tools upgrade system
 
 # re-disable yunohost-portal-api.service
 dmzexec systemctl stop yunohost-portal-api.service
-systemctl mask -f yunohost-portal-api.service
+dmzexec systemctl mask -f yunohost-portal-api.service
 
 dmzexec yunohost tools upgrade apps
 
