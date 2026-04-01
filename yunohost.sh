@@ -68,10 +68,27 @@ dmzexec()
 	lxc-attach -n "$DMZ_NAME" --clear-env --keep-var DEBIAN_FRONTEND -- /bin/sh -c "$*"
 }
 
+# auto-detect the PHP version YunoHost configured for Nextcloud
+nextcloud_php_version()
+{
+	if [ -z "${YNH_NEXTCLOUD_PHP_VERSION:-}" ]; then
+		YNH_NEXTCLOUD_PHP_VERSION=$(dmzexec "grep -o 'php[0-9]*\.[0-9]*-fpm-nextcloud' /etc/nginx/conf.d/$DOMAIN.d/nextcloud.conf" | grep -o '[0-9]*\.[0-9]*')
+	fi
+	echo "$YNH_NEXTCLOUD_PHP_VERSION"
+}
+
+nextcloud_update_preview_cron() {
+	local _php
+	_php=$(nextcloud_php_version)
+	dmzcat 644 /etc/cron.d/99-nextcloud-preview << EOF
+*/15  *  *  *  * nextcloud /usr/bin/php$_php --define apc.enable_cli=1 /var/www/nextcloud/occ preview:pre-generate
+EOF
+}
+
 # helper to run occ commands in the container
 nextcloud()
 {
-	dmzexec "cd /var/www/nextcloud && sudo -u nextcloud php8.3 --define apc.enable_cli=1 occ $*"
+	dmzexec "cd /var/www/nextcloud && sudo -u nextcloud php$(nextcloud_php_version) --define apc.enable_cli=1 occ $*"
 }
 
 # help to install nextcloud app if not yet done
@@ -692,9 +709,7 @@ nextcloud "config:system:set preview_max_y --value 1024"
 nextcloud "config:app:set previewgenerator squareSizes --value='64 256'"
 nextcloud "config:app:set previewgenerator widthSizes  --value='1024'"
 nextcloud "config:app:set previewgenerator heightSizes --value='1024'"
-dmzcat 644 /etc/cron.d/99-nextcloud-preview << EOF
-*/15  *  *  *  * nextcloud /usr/bin/php8.3 --define apc.enable_cli=1 /var/www/nextcloud/occ preview:pre-generate
-EOF
+nextcloud_update_preview_cron
 
 # scan data and generate preview if any
 nextcloud "files:scan-app-data"
@@ -929,6 +944,8 @@ nextcloud maintenance:mimetype:update-js
 nextcloud 'maintenance:mimetype:update-db --repair-filecache'
 nextcloud maintenance:theme:update
 nextcloud sharing:cleanup-remote-storages
+unset YNH_NEXTCLOUD_PHP_VERSION
+nextcloud_update_preview_cron
 
 # yunohost system update does not update everything
 dmzexec apt-get -y update
@@ -1008,6 +1025,10 @@ case "${1:-none}" in
 	"nextcloud-rescan")
 		nextcloud_rescan
 		;;
+	"nextcloud")
+		shift
+		nextcloud "$*"
+		;;
 	"borg-check")
 		borg_check
 		;;
@@ -1015,7 +1036,7 @@ case "${1:-none}" in
 		ynh_multimedia_update
 		;;
 	*)
-		echo "Usage: $0 <start|stop|restart|provision|backup|firewall|upgrade|nextcloud-rescan|borg-check|multimedia-update>" >&2
+		echo "Usage: $0 <start|stop|restart|provision|backup|firewall|upgrade|nextcloud-rescan|nextcloud|borg-check|multimedia-update>" >&2
 		exit 1
 esac
 # redirect stdout to syslog local0.debug
