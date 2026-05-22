@@ -934,6 +934,9 @@ dmzexec yunohost tools upgrade system
 dmzexec systemctl stop yunohost-portal-api.service
 dmzexec systemctl mask -f yunohost-portal-api.service
 
+# wait for dpkg lock to be released by the system upgrade before running apps upgrade
+dmzexec "flock /var/lib/dpkg/lock-frontend true"
+
 dmzexec yunohost tools upgrade apps
 
 # update nextcloud
