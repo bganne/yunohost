@@ -68,6 +68,29 @@ dmzexec()
 	lxc-attach -n "$DMZ_NAME" --clear-env --keep-var DEBIAN_FRONTEND -- /bin/sh -c "$*"
 }
 
+# wait until nothing holds the dpkg lock in the container.
+# YunoHost refuses to run its upgrade commands when the lock is busy, and it
+# tests this with `lsof /var/lib/dpkg/lock` (see dpkg_lock_available() in
+# yunohost/utils/system.py): any process keeping the file *open* is enough,
+# a flock on lock-frontend is not the same thing. apt/dpkg children of a
+# previous upgrade, or unattended-upgrades, can linger there for a while.
+dmz_wait_dpkg()
+{
+	local _i
+	_i=0
+	# lsof exits non-zero when no process has the files open (and also when
+	# lsof is missing, in which case YunoHost considers the lock free too)
+	while dmzexec "lsof /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend >/dev/null 2>&1"; do
+		if [ "$_i" -ge 600 ]; then
+			echo "!!! timeout waiting for the dpkg lock in $DMZ_NAME !!!" >&2
+			dmzexec "lsof /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend" >&2 || true
+			return 1
+		fi
+		_i=$((_i + 1))
+		sleep 1
+	done
+}
+
 # auto-detect the PHP version YunoHost configured for Nextcloud
 nextcloud_php_version()
 {
@@ -922,20 +945,23 @@ apt-get -y autoremove
 apt-get -y clean
 
 # update yunohost
+dmz_wait_dpkg
 dmzexec yunohost tools update
 
 # re-enable yunohost-portal-api.service temporarily, see
 # https://github.com/YunoHost/issues/issues/2525
 dmzexec ln -sf /usr/share/yunohost/conf/yunohost/yunohost-portal-api.service /etc/systemd/system/yunohost-portal-api.service
 
+dmz_wait_dpkg
 dmzexec yunohost tools upgrade system
 
 # re-disable yunohost-portal-api.service
 dmzexec systemctl stop yunohost-portal-api.service
 dmzexec systemctl mask -f yunohost-portal-api.service
 
-# wait for dpkg lock to be released by the system upgrade before running apps upgrade
-dmzexec "flock /var/lib/dpkg/lock-frontend true"
+# wait for the dpkg lock to be released by the system upgrade before running
+# the apps upgrade
+dmz_wait_dpkg
 
 dmzexec yunohost tools upgrade apps
 
@@ -951,6 +977,7 @@ unset YNH_NEXTCLOUD_PHP_VERSION
 nextcloud_update_preview_cron
 
 # yunohost system update does not update everything
+dmz_wait_dpkg
 dmzexec apt-get -y update
 dmzexec apt-get -y dist-upgrade
 dmzexec apt-get -y autoremove
