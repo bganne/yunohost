@@ -44,6 +44,24 @@ readonly MAIL_RELAY_PORT='465'
 
 readonly TIMEZONE='Europe/Paris'
 
+# UPS monitored with NUT, see https://networkupstools.org/stable-hcl.html
+# for the driver - the defaults work for most USB UPS (Eaton, APC...)
+readonly UPS_NAME=ups
+readonly UPS_DRIVER=usbhid-ups
+readonly UPS_PORT=auto
+readonly UPS_DESC='USB UPS'
+# extra driver options, one per line, see ups.conf(5) - eg. 'vendorid = 0463'
+readonly UPS_OPTS=''
+# shutdown when charge (%) or runtime (seconds) falls below these thresholds
+readonly UPS_LOW_CHARGE=30
+readonly UPS_LOW_RUNTIME=300
+# after the shutdown the UPS cuts its outlets after UPS_OFFDELAY seconds, then
+# powers them back UPS_ONDELAY seconds after the mains is back (must be greater
+# than UPS_OFFDELAY, multiple of 60 for usbhid-ups) so the server reboots
+# (BIOS: power on after AC loss) once the battery has recharged a bit
+readonly UPS_OFFDELAY=30
+readonly UPS_ONDELAY=180
+
 # disable interactive prompts for package config/install
 export DEBIAN_FRONTEND=noninteractive
 
@@ -292,6 +310,176 @@ rm -f "/var/run/netns/$nspid"
 } # end of start()
 
 #
+# UPS
+#  monitor the UPS with NUT and shutdown when running out of battery
+#
+
+ups_setup() {
+
+apt-get -y install nut-server nut-client
+
+# make the USB device accessible to the nut user if already plugged in
+udevadm control --reload-rules
+udevadm trigger --subsystem-match=usb --action=add
+
+local pass
+pass="$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32)"
+
+cat > /etc/nut/nut.conf << EOF
+MODE=standalone
+EOF
+
+# ignorelb: do not wait for the UPS low battery signal (too late for a clean
+# shutdown of the container), compare charge and runtime with ours instead
+cat > /etc/nut/ups.conf << EOF
+[$UPS_NAME]
+	driver = $UPS_DRIVER
+	port = $UPS_PORT
+	desc = "$UPS_DESC"
+	ignorelb
+	override.battery.charge.low = $UPS_LOW_CHARGE
+	override.battery.runtime.low = $UPS_LOW_RUNTIME
+	offdelay = $UPS_OFFDELAY
+	ondelay = $UPS_ONDELAY
+$(printf '%s\n' "$UPS_OPTS" | sed -e '/^[[:space:]]*$/d' -e 's/^/\t/')
+EOF
+
+cat > /etc/nut/upsd.conf << EOF
+LISTEN 127.0.0.1 3493
+EOF
+
+cat > /etc/nut/upsd.users << EOF
+[upsmon]
+	password = $pass
+	upsmon primary
+EOF
+
+# upsmon cuts the UPS power at the end of the shutdown (POWERDOWNFLAG), so that
+# the server boots again when power comes back (requires "power on after AC
+# loss" in the BIOS)
+cat > /etc/nut/upsmon.conf << EOF
+MONITOR $UPS_NAME@localhost 1 upsmon $pass primary
+MINSUPPLIES 1
+SHUTDOWNCMD "/sbin/shutdown -h +0"
+POWERDOWNFLAG /etc/killpower
+NOTIFYCMD /usr/local/sbin/ups-notify
+NOTIFYFLAG ONLINE   SYSLOG+WALL+EXEC
+NOTIFYFLAG ONBATT   SYSLOG+WALL+EXEC
+NOTIFYFLAG LOWBATT  SYSLOG+WALL+EXEC
+NOTIFYFLAG FSD      SYSLOG+WALL+EXEC
+NOTIFYFLAG COMMOK   SYSLOG+WALL+EXEC
+NOTIFYFLAG COMMBAD  SYSLOG+WALL+EXEC
+NOTIFYFLAG SHUTDOWN SYSLOG+WALL+EXEC
+NOTIFYFLAG REPLBATT SYSLOG+WALL+EXEC
+NOTIFYFLAG NOCOMM   SYSLOG+WALL+EXEC
+EOF
+
+chown root:nut /etc/nut/*.conf /etc/nut/upsd.users
+chmod 640 /etc/nut/*.conf /etc/nut/upsd.users
+
+# upsmon notifications are mailed to root
+cat > /usr/local/sbin/ups-notify << 'EOF'
+#!/bin/sh
+echo "$*" | mail -s "[$(hostname)] UPS $NOTIFYTYPE: $*" root
+EOF
+chmod 755 /usr/local/sbin/ups-notify
+
+# (re)generate the driver service from ups.conf and (re)start everything
+systemctl enable nut.target nut-driver.target nut-driver-enumerator.service nut-server.service nut-monitor.service
+systemctl restart nut-driver-enumerator.service
+# the driver fails (and keeps retrying) if the UPS is not plugged in
+systemctl restart nut-driver.target || true
+systemctl restart nut-server.service nut-monitor.service
+
+} # end of ups_setup
+
+#
+# MONITORING
+#  munin graphs as static html pages, served by nginx
+#
+
+monitoring_setup() {
+
+apt-get -y install --no-install-recommends munin munin-node munin-plugins-core lm-sensors nginx
+
+# enable all plugins relevant for this system (cpu, memory, df, if_, sensors_...)
+munin-node-configure --shell 2>/dev/null | sh
+
+# UPS plugin
+cat > /etc/munin/plugin-conf.d/ups << EOF
+[ups]
+env.ups $UPS_NAME@localhost
+env.NUT_QUIET_INIT_SSL 1
+EOF
+cat > /etc/munin/plugins/ups << 'EOF'
+#!/bin/sh
+# UPS status from NUT, UPS name is set in /etc/munin/plugin-conf.d/ups
+#%# family=manual
+if [ "${1:-}" = "config" ]; then
+	cat << EOC
+multigraph ups_charge
+graph_title UPS battery charge and load
+graph_category ups
+graph_vlabel %
+graph_args --base 1000 -l 0 -u 100 -r
+charge.label battery charge
+load.label load
+multigraph ups_runtime
+graph_title UPS battery runtime
+graph_category ups
+graph_vlabel minutes
+graph_args --base 1000 -l 0
+runtime.label runtime
+multigraph ups_voltage
+graph_title UPS voltages
+graph_category ups
+graph_vlabel V
+input.label input
+output.label output
+multigraph ups_onbatt
+graph_title UPS on battery
+graph_category ups
+graph_args --base 1000 -l 0 -u 1 -r
+onbatt.label on battery
+onbatt.critical 0:0
+EOC
+	exit 0
+fi
+upsc "$ups" 2>/dev/null | awk -F': ' '
+function p(field, key) { print field ".value " (key in v ? v[key] : "U") }
+{ v[$1] = $2 }
+END {
+	if ("battery.runtime" in v) v["battery.runtime"] /= 60
+	if ("ups.status" in v) v["ups.status"] = (v["ups.status"] ~ /OB/)
+	print "multigraph ups_charge"
+	p("charge", "battery.charge")
+	p("load", "ups.load")
+	print "multigraph ups_runtime"
+	p("runtime", "battery.runtime")
+	print "multigraph ups_voltage"
+	p("input", "input.voltage")
+	p("output", "output.voltage")
+	print "multigraph ups_onbatt"
+	p("onbatt", "ups.status")
+}'
+EOF
+chmod 755 /etc/munin/plugins/ups
+# munin master is local: listen on localhost only - the default (any address,
+# including IPv6) fails as IPv6 is disabled
+sed -i 's/^host \*$/host 127.0.0.1/' /etc/munin/munin-node.conf
+systemctl restart munin-node
+# name the local node after the host instead of the default localhost.localdomain
+sed -i "s/^\[localhost\.localdomain\]$/[$HOST_FQDN]/" /etc/munin/munin.conf
+
+# serve munin static pages with the nginx default site, under /munin/
+ln -sfn /var/cache/munin/www /var/www/html/munin
+
+# 1st run to generate the pages, then munin cron runs every 5 minutes
+runuser -u munin -- /usr/bin/munin-cron
+
+} # end of monitoring_setup
+
+#
 # PROVISION
 #  setup host - must be run once
 #
@@ -507,6 +695,10 @@ start_smartd=yes
 EOF
 systemctl restart smartmontools
 
+## setup UPS and monitoring
+ups_setup
+monitoring_setup
+
 ### Setup DMZ container
 
 ## Setup system for unprivileged containers
@@ -701,6 +893,11 @@ dmzexec systemctl restart fail2ban
 
 # install rspamd
 ynh_app_install rspamd
+
+# expose host munin pages (see monitoring_setup) publicly on domain.tld/munin
+# redirect is multi-instance: check the path is not mapped yet instead of the app
+dmzexec "yunohost app map" | grep -q '/munin' ||
+	dmzexec "yunohost app install redirect -a 'domain=$DOMAIN&path=/munin&redirect_type=reverseproxy&target=http://$LAN_IP4/munin/&init_main_permission=visitors'"
 
 # install nextcloud into domain.tld/cloud with mail and calendar apps
 ynh_app_install nextcloud -a "'domain=$DOMAIN&path=/cloud&admin=$YN_USER&user_home=yes'"
